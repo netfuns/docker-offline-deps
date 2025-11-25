@@ -26,20 +26,21 @@ jobs:
           ARCH=$(dpkg --print-architecture)
           BASE_URL="https://download.docker.com/linux/ubuntu/dists/${UBUNTU_CODENAME}/pool/stable/$ARCH"
 
-          # 获取最新版本包的通用函数
+          # 获取最新版本包的通用函数（增强版）
           get_latest() {
             local pkg="$1"
-            curl -fsSL "$BASE_URL/" \
-              | grep -oP 'href="\K[^"]+'"$pkg"'(?=_'"$ARCH"'\.deb)' \
-              | sort -Vr | head -n1
+            local page_content=$(curl -fsSL "$BASE_URL/" || echo "ERROR: Failed to fetch page")
+            
+            # 增强的正则表达式匹配逻辑
+            echo "$page_content" | grep -oP 'href="\K[^"]+/'"$pkg"'/[^/]+_'"$ARCH"'\.deb'
           }
 
           # 获取各组件最新包链接
-          CONTAINERD=$(get_latest containerd.io)
-          DOCKER_CE=$(get_latest docker-ce)
-          CLI=$(get_latest docker-ce-cli)
-          BUILDX_PLUGIN=$(get_latest docker-buildx-plugin)
-          COMPOSE_PLUGIN=$(get_latest docker-compose-plugin)
+          CONTAINERD=$(get_latest containerd.io) || { echo "Containerd not found"; exit 1; }
+          DOCKER_CE=$(get_latest docker-ce)       || { echo "Docker CE not found"; exit 1; }
+          CLI=$(get_latest docker-ce-cli)         || { echo "CLI not found"; exit 1; }
+          BUILDX_PLUGIN=$(get_latest docker-buildx-plugin) || { echo "Buildx Plugin not found"; exit 1; }
+          COMPOSE_PLUGIN=$(get_latest docker-compose-plugin) || { echo "Compose Plugin not found"; exit 1; }
 
           # 输出到 GitHub Actions 环境变量
           echo "CONTAINERD_URL=$CONTAINERD" >> $GITHUB_OUTPUT
