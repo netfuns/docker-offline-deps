@@ -44,6 +44,9 @@ jobs:
           
           get_latest() {
             local pkg="$1"
+            # 为了在输出变量名中使用，将包名中的点号替换为下划线
+            local safe_pkg_name=$(echo "$pkg" | tr '.' '_')
+            
             local escaped_pkg=$(echo "$pkg" | sed 's/[.*+?^${}()|[\]\\]/\\&/g')
             local regex="<a href=\"(${escaped_pkg}_[0-9]+\.[0-9]+\.[0-9]+[^_\"]*_${ARCH}\.deb)\""
             local matches=$(echo "$PAGE_CONTENT" | grep -oE "$regex" | cut -d'"' -f2)
@@ -56,9 +59,9 @@ jobs:
             local latest=$(echo "$matches" | sort -Vr | head -n1)
             local version=$(echo "$latest" | sed -E "s/^${escaped_pkg}_([0-9]+\.[0-9]+\.[0-9]+[^_]+)_.*$/\1/")
             
-            # 输出到步骤输出，同时也设置为环境变量
-            printf "%s=%s\n" "${pkg}_URL" "${BASE_URL}/${latest}" >> "$GITHUB_OUTPUT"
-            printf "%s=%s\n" "${pkg}_VERSION" "$version" >> "$GITHUB_OUTPUT"
+            # 使用安全的变量名输出
+            printf "%s_URL=%s\n" "$safe_pkg_name" "${BASE_URL}/${latest}" >> "$GITHUB_OUTPUT"
+            printf "%s_VERSION=%s\n" "$safe_pkg_name" "$version" >> "$GITHUB_OUTPUT"
           }
 
           get_latest "containerd.io"
@@ -78,18 +81,19 @@ jobs:
           echo "## Docker 组件" >> "$VERSION_FILE"
           echo "" >> "$VERSION_FILE"
 
-          # 直接使用从步骤输出设置的环境变量
           components=("containerd.io" "docker-ce" "docker-ce-cli" "docker-buildx-plugin" "docker-compose-plugin")
           for comp in "${components[@]}"; do
-            # 从环境变量中获取 URL 和版本号
-            url_var="${comp}_URL"
-            ver_var="${comp}_VERSION"
+            # 在引用环境变量时，同样将点号替换为下划线
+            local safe_comp_name=$(echo "$comp" | tr '.' '_')
+            local url_var="${safe_comp_name}_URL"
+            local ver_var="${safe_comp_name}_VERSION"
             
-            url="${!url_var}"  # 使用间接变量引用
+            # 使用间接变量引用
+            url="${!url_var}"
             ver="${!ver_var}"
             
             if [ -z "$url" ] || [ -z "$ver" ]; then
-              echo "ERROR: Missing URL or version for $comp" >&2
+              echo "ERROR: Missing URL or version for $comp (tried variables: $url_var, $ver_var)" >&2
               exit 1
             fi
             
@@ -100,10 +104,10 @@ jobs:
             fi
             echo "$comp: $ver" >> "$VERSION_FILE"
           done
-        # 将上一步的所有输出作为环境变量注入
+        # 将上一步的输出作为环境变量注入，变量名已经是安全的
         env:
-          containerd.io_URL: ${{ steps.docker_info.outputs.containerd.io_URL }}
-          containerd.io_VERSION: ${{ steps.docker_info.outputs.containerd.io_VERSION }}
+          containerd_io_URL: ${{ steps.docker_info.outputs.containerd_io_URL }}
+          containerd_io_VERSION: ${{ steps.docker_info.outputs.containerd_io_VERSION }}
           docker-ce_URL: ${{ steps.docker_info.outputs.docker-ce_URL }}
           docker-ce_VERSION: ${{ steps.docker_info.outputs.docker-ce_VERSION }}
           docker-ce-cli_URL: ${{ steps.docker_info.outputs.docker-ce-cli_URL }}
