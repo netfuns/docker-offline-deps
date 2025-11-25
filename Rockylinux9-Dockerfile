@@ -1,5 +1,5 @@
 # 基础镜像
-FROM rockylinux/rockylinux:9-ubi-micro
+FROM rockylinux/rockylinux:9-ubi-init
 
 # 安装必要工具
 RUN dnf install -y wget tar gzip dnf-plugins-core createrepo_c
