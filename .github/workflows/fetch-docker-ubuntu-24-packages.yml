@@ -46,12 +46,22 @@ jobs:
             echo "$matches" | sort -Vr | head -n1
           }
 
-          # 获取各组件最新包文件名
+          # 获取 Docker 组件
           CONTAINERD=$(get_latest "containerd.io") || exit 1
           DOCKER_CE=$(get_latest "docker-ce") || exit 1
           CLI=$(get_latest "docker-ce-cli") || exit 1
           BUILDX_PLUGIN=$(get_latest "docker-buildx-plugin") || exit 1
           COMPOSE_PLUGIN=$(get_latest "docker-compose-plugin") || exit 1
+
+          # 获取系统工具包
+          UUID_RUNTIME=$(get_latest "uuid-runtime") || exit 1
+          IPTABLES=$(get_latest "iptables") || exit 1
+          LIBIP4TC=$(get_latest "libip4tc2") || exit 1
+          LIBIP6TC=$(get_latest "libip6tc2") || exit 1
+          LIBNETFILTER_CONNTRACK=$(get_latest "libnetfilter-conntrack3") || exit 1
+          LIBNFNETLINK=$(get_latest "libnfnetlink0") || exit 1
+          LIBNFTNL=$(get_latest "libnftnl11") || exit 1
+          LIBXTABLES=$(get_latest "libxtables12") || exit 1
 
           # 输出完整下载URL
           echo "CONTAINERD_URL=${BASE_URL}/${CONTAINERD}" >> $GITHUB_OUTPUT
@@ -60,6 +70,16 @@ jobs:
           echo "BUILDX_PLUGIN_URL=${BASE_URL}/${BUILDX_PLUGIN}" >> $GITHUB_OUTPUT
           echo "COMPOSE_PLUGIN_URL=${BASE_URL}/${COMPOSE_PLUGIN}" >> $GITHUB_OUTPUT
 
+          # 输出系统工具包URL
+          echo "UUID_RUNTIME_URL=${BASE_URL}/${UUID_RUNTIME}" >> $GITHUB_OUTPUT
+          echo "IPTABLES_URL=${BASE_URL}/${IPTABLES}" >> $GITHUB_OUTPUT
+          echo "LIBIP4TC_URL=${BASE_URL}/${LIBIP4TC}" >> $GITHUB_OUTPUT
+          echo "LIBIP6TC_URL=${BASE_URL}/${LIBIP6TC}" >> $GITHUB_OUTPUT
+          echo "LIBNETFILTER_CONNTRACK_URL=${BASE_URL}/${LIBNETFILTER_CONNTRACK}" >> $GITHUB_OUTPUT
+          echo "LIBNFNETLINK_URL=${BASE_URL}/${LIBNFNETLINK}" >> $GITHUB_OUTPUT
+          echo "LIBNFTNL_URL=${BASE_URL}/${LIBNFTNL}" >> $GITHUB_OUTPUT
+          echo "LIBXTABLES_URL=${BASE_URL}/${LIBXTABLES}" >> $GITHUB_OUTPUT
+
           # 调试输出
           echo "DEBUG: Found packages:"
           echo "Containerd: $CONTAINERD"
@@ -67,28 +87,56 @@ jobs:
           echo "CLI: $CLI"
           echo "Buildx: $BUILDX_PLUGIN"
           echo "Compose: $COMPOSE_PLUGIN"
+          echo "UUID Runtime: $UUID_RUNTIME"
+          echo "Iptables: $IPTABLES"
+          echo "Libip4tc: $LIBIP4TC"
+          echo "Libip6tc: $LIBIP6TC"
+          echo "Libnetfilter Conntrack: $LIBNETFILTER_CONNTRACK"
+          echo "Libnfnetlink: $LIBNFNETLINK"
+          echo "Libnftnl: $LIBNFTNL"
+          echo "Libxtables: $LIBXTABLES"
 
       - name: Download packages
         run: |
           set -euo pipefail
           mkdir -p "$TARGET_DIR/deps"
           
-          # 下载所有组件
+          # 下载 Docker 组件
           curl -fsSL "${{ steps.package_urls.outputs.CONTAINERD_URL }}" -o "$TARGET_DIR/deps/containerd.deb"
           curl -fsSL "${{ steps.package_urls.outputs.DOCKER_CE_URL }}" -o "$TARGET_DIR/deps/docker-ce.deb"
           curl -fsSL "${{ steps.package_urls.outputs.CLI_URL }}" -o "$TARGET_DIR/deps/docker-ce-cli.deb"
           curl -fsSL "${{ steps.package_urls.outputs.BUILDX_PLUGIN_URL }}" -o "$TARGET_DIR/deps/docker-buildx-plugin.deb"
           curl -fsSL "${{ steps.package_urls.outputs.COMPOSE_PLUGIN_URL }}" -o "$TARGET_DIR/deps/docker-compose-plugin.deb"
 
+          # 下载系统工具包
+          curl -fsSL "${{ steps.package_urls.outputs.UUID_RUNTIME_URL }}" -o "$TARGET_DIR/deps/uuid-runtime.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.IPTABLES_URL }}" -o "$TARGET_DIR/deps/iptables.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.LIBIP4TC_URL }}" -o "$TARGET_DIR/deps/libip4tc2.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.LIBIP6TC_URL }}" -o "$TARGET_DIR/deps/libip6tc2.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.LIBNETFILTER_CONNTRACK_URL }}" -o "$TARGET_DIR/deps/libnetfilter-conntrack3.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.LIBNFNETLINK_URL }}" -o "$TARGET_DIR/deps/libnfnetlink0.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.LIBNFTNL_URL }}" -o "$TARGET_DIR/deps/libnftnl11.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.LIBXTABLES_URL }}" -o "$TARGET_DIR/deps/libxtables12.deb"
+
       - name: Verify downloaded files
         run: |
           ls -lR "$TARGET_DIR/deps"
-          echo "Package versions:"
+          echo "Docker components:"
           dpkg-deb -f "$TARGET_DIR/deps/containerd.deb" Package Version
           dpkg-deb -f "$TARGET_DIR/deps/docker-ce.deb" Package Version
           dpkg-deb -f "$TARGET_DIR/deps/docker-ce-cli.deb" Package Version
           dpkg-deb -f "$TARGET_DIR/deps/docker-buildx-plugin.deb" Package Version
           dpkg-deb -f "$TARGET_DIR/deps/docker-compose-plugin.deb" Package Version
+
+          echo "System tools:"
+          dpkg-deb -f "$TARGET_DIR/deps/uuid-runtime.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/iptables.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/libip4tc2.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/libip6tc2.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/libnetfilter-conntrack3.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/libnfnetlink0.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/libnftnl11.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/libxtables12.deb" Package Version
 
       - name: Compress deps directory
         run: |
@@ -100,14 +148,12 @@ jobs:
         with:
           name: ubuntu-24.04-docker-deps
           path: "$TARGET_DIR/deps.zip"
-      - name: Set release tag
-        run: echo "RELEASE_TAG=ubuntu-24.04-docker-packages-$(date +'%Y%m%d')" >> $GITHUB_ENV
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: ${{ env.RELEASE_TAG }}
+          tag_name: ubuntu-24.04-docker-packages-$(date +%Y%m%d)
+          name: Ubuntu 24.04 Docker Packages $(date +%Y%m%d)
           body: |
             📦 Ubuntu 24.04 (Noble) Docker 组件包：
             
@@ -117,8 +163,18 @@ jobs:
             - docker-buildx-plugin
             - docker-compose-plugin
             
+            🔧 系统依赖工具：
+            - uuid-runtime
+            - iptables
+            - libip4tc2
+            - libip6tc2
+            - libnetfilter-conntrack3
+            - libnfnetlink0
+            - libnftnl11
+            - libxtables12
+            
             包含架构: amd64
           files: |
             ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.zip
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}  # 使用新 Secret
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
