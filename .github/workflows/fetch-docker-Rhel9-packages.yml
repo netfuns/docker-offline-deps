@@ -21,13 +21,13 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t Rhel9-builder -f Rhel9-Dockerfile .
+          docker build -t rhel9-builder -f Rhel9-Dockerfile .
 
       - name: Extract dependencies
         id: build_deps
         run: |
           mkdir -p $TARGET_DIR
-          docker create --name temp-container Rhel9-builder
+          docker create --name temp-container rhel9-builder
           docker cp temp-container:/tmp.tar.gz "$TARGET_DIR/deps.tar.gz"
           docker rm temp-container
 
@@ -52,7 +52,7 @@ jobs:
         if: steps.check_empty.outputs.is_empty == 'false'
         id: generate_tag
         run: |
-          RELEASE_TAG="Rhel9-deps-$(date +'%Y%m%d')"
+          RELEASE_TAG="rhel9-deps-$(date +'%Y%m%d')"
           echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
 
       - name: Create GitHub Release
