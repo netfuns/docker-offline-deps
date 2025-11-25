@@ -3,129 +3,233 @@ name: Download Docker & CentOS System Packages
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 1 1 * *' # 每月1号 01:00 UTC 自动运行
+    - cron: '0 1 1 * *'  # 每月1号 01:00 UTC 自动运行
 
 env:
-  CENTOS_VERSION: 9        # CentOS 9 Stream
-  TARGET_DIR: deps         # 统一解压目标目录
-  ARCH: x86_64             # CentOS 使用 x86_64 架构标识
-  REPO_BASE: https://mirror.centos.org/centos/${CENTOS_VERSION}/BaseOS/x86_64/os/Packages/
+  CENTOS_VERSION: 9-stream  # CentOS 9 Stream
+  TARGET_DIR: deps          # 统一解压目标目录
+  ARCH: x86_64              # CentOS 架构（x86_64 对应 amd64）
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container:
-      image: "quay.io/centos/centos:stream9"  # 需要运行的容器镜像（参考 docker hub）
+    runs-on: ubuntu-latest  # 仍可使用 Ubuntu  runner，通过工具下载 CentOS 包
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo dnf install -y curl jq gzip tar
-
-      # ----------------------------
-      # Step 1: Configure Docker Repository
-      # ----------------------------
-      - name: Add Docker CE repository
         run: |
-          sudo tee /etc/dnf.repos.d/docker-ce.repo << EOF
-          [docker-ce-stable]
-          name=Docker CE Stable - \$basearch
-          baseurl=https://download.docker.com/linux/centos/\$releasever/\$basearch/stable
-          enabled=1
-          gpgcheck=1
-          gpgkey=https://download.docker.com/linux/centos/gpg
-          EOF
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            curl jq gzip libxml2-utils  # libxml2-utils 用于解析 CentOS 仓库 XML
 
       # ----------------------------
-      # Step 2: Install Docker Components
+      # Step 1: 下载 Docker 组件 (rpm 包)
       # ----------------------------
-      - name: Install Docker packages
-        run: |
-          sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-      # ----------------------------
-      # Step 3: Download System Packages
-      # ----------------------------
-      - name: Define system packages
-        run: |
-          echo "SYSTEM_PACKAGES=util-linux nc net-tools openssl-libs glibc-common libseccomp fuse3-libs fuse-overlayfs slirp4netns" >> $GITHUB_ENV
-
-      - name: Download system packages
+      - name: 获取 Docker 包最新下载链接
+        id: package_urls
         run: |
           set -euo pipefail
-          packages=(${SYSTEM_PACKAGES// / })
+          # CentOS Docker 官方仓库地址
+          BASE_URL="https://download.docker.com/linux/centos/${CENTOS_VERSION}/${ARCH}/stable"
           
-          for pkg in "${packages[@]}"; do
-            echo "Downloading $pkg..."
-            # 使用 dnf 下载指定包
-            sudo dnf download --destdir="$TARGET_DIR/deps" --resolve "$pkg"
+          # 获取仓库页面内容
+          PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
+          echo "DEBUG: 仓库页面内容预览:"
+          echo "$PAGE_CONTENT" | head -n 20
+
+          # 提取指定包的最新版本（rpm 格式：包名-版本-Release.el9.x86_64.rpm）
+          get_latest() {
+            local pkg="$1"
+            # 匹配 rpm 包文件名格式
+            local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}-[0-9]+\.[0-9]+\.[0-9]+.*\.el9\.${ARCH}\.rpm\">" | cut -d'"' -f2)
+            
+            if [ -z "$matches" ]; then
+              echo "ERROR: 未找到 ${pkg} 的 rpm 包" >&2
+              return 1
+            fi
+            
+            # 按版本号排序取最新
+            echo "$matches" | sort -Vr | head -n1
+          }
+
+          # 获取各 Docker 组件最新包
+          CONTAINERD=$(get_latest "containerd.io") || exit 1
+          DOCKER_CE=$(get_latest "docker-ce") || exit 1
+          CLI=$(get_latest "docker-ce-cli") || exit 1
+          BUILDX_PLUGIN=$(get_latest "docker-buildx-plugin") || exit 1
+          COMPOSE_PLUGIN=$(get_latest "docker-compose-plugin") || exit 1
+
+          # 输出完整下载链接
+          echo "CONTAINERD_URL=${BASE_URL}/${CONTAINERD}" >> $GITHUB_OUTPUT
+          echo "DOCKER_CE_URL=${BASE_URL}/${DOCKER_CE}" >> $GITHUB_OUTPUT
+          echo "CLI_URL=${BASE_URL}/${CLI}" >> $GITHUB_OUTPUT
+          echo "BUILDX_PLUGIN_URL=${BASE_URL}/${BUILDX_PLUGIN}" >> $GITHUB_OUTPUT
+          echo "COMPOSE_PLUGIN_URL=${BASE_URL}/${COMPOSE_PLUGIN}" >> $GITHUB_OUTPUT
+
+          # 调试输出
+          echo "DEBUG: 找到的 Docker 包:"
+          echo "Containerd: $CONTAINERD"
+          echo "Docker CE: $DOCKER_CE"
+          echo "CLI: $CLI"
+          echo "Buildx: $BUILDX_PLUGIN"
+          echo "Compose: $COMPOSE_PLUGIN"
+
+      - name: 下载 Docker 组件
+        run: |
+          set -euo pipefail
+          mkdir -p "$TARGET_DIR/deps"
+          
+          # 下载所有 Docker 组件（保存为 rpm 包）
+          curl -fsSL "${{ steps.package_urls.outputs.CONTAINERD_URL }}" -o "$TARGET_DIR/deps/containerd.io.rpm"
+          curl -fsSL "${{ steps.package_urls.outputs.DOCKER_CE_URL }}" -o "$TARGET_DIR/deps/docker-ce.rpm"
+          curl -fsSL "${{ steps.package_urls.outputs.CLI_URL }}" -o "$TARGET_DIR/deps/docker-ce-cli.rpm"
+          curl -fsSL "${{ steps.package_urls.outputs.BUILDX_PLUGIN_URL }}" -o "$TARGET_DIR/deps/docker-buildx-plugin.rpm"
+          curl -fsSL "${{ steps.package_urls.outputs.COMPOSE_PLUGIN_URL }}" -o "$TARGET_DIR/deps/docker-compose-plugin.rpm"
+
+      - name: 验证 Docker 包
+        run: |
+          echo "Docker 包列表:"
+          ls -l "$TARGET_DIR/deps/"
+          echo -e "\nDocker 包版本信息:"
+          for rpm in "$TARGET_DIR/deps"/*.rpm; do
+            rpm -qpi "$rpm" | grep -E "Name|Version|Release"
+            echo "------------------------"
           done
 
       # ----------------------------
-      # Step 4: Merge & Compress
-      - name: Check if deps directory is empty
-        id: check_empty
+      # Step 2: 下载 CentOS 系统包 (rpm 包)
+      # ----------------------------
+      - name: 定义需要下载的系统包
         run: |
-          if [ -z "$(ls -A $TARGET_DIR)" ]; then
-            echo "ERROR: No files found in $TARGET_DIR. Aborting compression." >&2
-            echo "is_empty=true" >> $GITHUB_OUTPUT
-          else
-            echo "is_empty=false" >> $GITHUB_OUTPUT
+          # CentOS 9 必需的系统依赖包
+          echo "SYSTEM_PACKAGES=libseccomp fuse3-libs fuse-overlayfs slirp4netns" >> $GITHUB_ENV
+
+      - name: 下载 CentOS 系统包
+        run: |
+          set -euo pipefail
+          packages=(${SYSTEM_PACKAGES// / })
+          # CentOS 9 官方仓库（BaseOS 和 AppStream）
+          REPOS=("BaseOS" "AppStream")
+          
+          for repo in "${REPOS[@]}"; do
+            echo -e "\n尝试从仓库: $repo 下载"
+            REPO_URL="https://mirror.centos.org/centos/9-stream/${repo}/x86_64/os/"
+            
+            # 下载仓库元数据（primary.xml.gz，包含所有包信息）
+            if ! curl -fsSL "$REPO_URL/repodata/primary.xml.gz" -o primary.xml.gz; then
+              echo "WARNING: 无法下载 $repo 的元数据"
+              continue
+            fi
+            
+            # 解压元数据
+            gunzip -f primary.xml.gz || { echo "WARNING: 解压元数据失败"; rm -f primary.xml; continue; }
+            
+            # 解析 XML 并下载目标包
+            for pkg in "${packages[@]}"; do
+              # 跳过已下载的包
+              [ -f "$TARGET_DIR/deps/$pkg.rpm" ] && continue
+              
+              # 用 xmllint 解析包的下载路径（CentOS 仓库元数据为 XML 格式）
+              LOCATION=$(xmllint --xpath \
+                "string(//rpm:package[rpm:name='$pkg']/rpm:location/@href)" \
+                primary.xml 2>/dev/null)
+              
+              if [ -n "$LOCATION" ]; then
+                FILE_URL="$REPO_URL/$LOCATION"
+                echo "下载 $pkg: $FILE_URL"
+                if curl -fsSL "$FILE_URL" -o "$TARGET_DIR/deps/$pkg.rpm"; then
+                  echo "成功下载 $pkg"
+                else
+                  echo "WARNING: 下载 $pkg 失败"
+                fi
+              fi
+            done
+            
+            rm -f primary.xml
+          done
+
+          # 检查是否所有包都下载成功
+          missing_packages=()
+          for pkg in "${packages[@]}"; do
+            if [ ! -f "$TARGET_DIR/deps/$pkg.rpm" ]; then
+              missing_packages+=("$pkg")
+            fi
+          done
+          
+          if [ ${#missing_packages[@]} -ne 0 ]; then
+            echo -e "\nERROR: 以下包未找到: ${missing_packages[*]}" >&2
+            exit 1
           fi
 
-      - name: Add install script
+          echo -e "\n所有系统包下载完成:"
+          ls -l "$TARGET_DIR/deps/"
+
+      # ----------------------------
+      # Step 3: 合并文件并压缩
+      # ----------------------------
+      - name: 添加 CentOS 安装脚本
         run: |
-          cp centos-install.sh "$TARGET_DIR/deps/install.sh"  # 需提供对应的安装脚本
+          set -euo pipefail
+          # 确保仓库根目录有 CentOS 适配的安装脚本（需自行创建 centos-install.sh）
+          if [ ! -f "centos-install.sh" ]; then
+            echo "ERROR: 未找到 CentOS 安装脚本 centos-install.sh" >&2
+            exit 1
+          fi
+          # 复制脚本到目标目录并添加执行权限
+          cp centos-install.sh "$TARGET_DIR/deps/install.sh"
           chmod +x "$TARGET_DIR/deps/install.sh"
+          echo "已添加安装脚本: install.sh"
 
-      - name: Compress deps directory
-        if: steps.check_empty.outputs.is_empty == 'false'
+      - name: 压缩所有文件
         run: |
+          set -euo pipefail
           cd "$TARGET_DIR"
+          # 压缩 deps 目录为 deps.tar.gz
           tar -czvf deps.tar.gz deps
+          echo -e "\n压缩完成，文件列表:"
+          tar -tf deps.tar.gz
 
-
-      - name: Upload artifact
-        if: steps.check_empty.outputs.is_empty == 'false'
+      # ----------------------------
+      # Step 4: 上传制品
+      # ----------------------------
+      - name: 上传离线包
         uses: actions/upload-artifact@v4
         with:
-          name: CentOS9-docker-system-deps
-          path: "$TARGET_DIR/deps.tar.gz"
+          name: centos-9-docker-system-deps
+          path: "${{ env.TARGET_DIR }}/deps.tar.gz"
+          retention-days: 30  # 保留 30 天
 
       # ----------------------------
-      # Step 4-6: Create Release (only if files exist)
+      # Step 5: 创建 Release（可选）
       # ----------------------------
-      - name: Generate release tag
-        if: steps.check_empty.outputs.is_empty == 'false'
+      - name: 生成 Release 标签
         id: generate_tag
         run: |
-          RELEASE_TAG="CentOS9-deps-$(date +'%Y%m%d')"
+          RELEASE_TAG="centos-9-deps-$(date +'%Y%m%d')"
           echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
 
-      - name: Create GitHub Release
-        if: steps.check_empty.outputs.is_empty == 'false'
+      - name: 创建 GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: CentOS9 Docker + System Dependencies (${{ env.RELEASE_TAG }})
+          name: CentOS 9 Docker + 系统依赖 (${{ env.RELEASE_TAG }})
           body: |
             📦 包含以下组件：
+            - Docker CE 全家桶 (containerd.io, docker-ce, docker-ce-cli, buildx, compose)
+            - CentOS 9 系统依赖 (libseccomp, fuse3-libs, fuse-overlayfs, slirp4netns)
+            - 一键安装脚本 (install.sh)
             
-            - Docker CE 全家桶
-            - CentOS 9 系统工具包
-            
-            支持架构: amd64
-            
+            支持架构: x86_64
             此 Release 由 GitHub Actions 自动生成。
-          files: |
-            ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.tar.gz
+          files: "${{ env.TARGET_DIR }}/deps.tar.gz"
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
 
       # ----------------------------
-      # Step 7: Cleanup
+      # Step 6: 清理
       # ----------------------------
-      - name: Cleanup
+      - name: 清理临时文件
+        if: always()
         run: |
           rm -rf "$TARGET_DIR"
+          rm -f primary.xml.gz primary.xml
