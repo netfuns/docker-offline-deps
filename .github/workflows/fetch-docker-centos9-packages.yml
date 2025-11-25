@@ -1,0 +1,129 @@
+name: Download Docker & CentOS System Packages
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 1 1 * *' # 每月1号 01:00 UTC 自动运行
+
+env:
+  CENTOS_VERSION: 9        # CentOS 9 Stream
+  TARGET_DIR: deps         # 统一解压目标目录
+  ARCH: x86_64             # CentOS 使用 x86_64 架构标识
+  REPO_BASE: https://mirror.centos.org/centos/${CENTOS_VERSION}/BaseOS/x86_64/os/Packages/
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo dnf install -y curl jq gzip tar
+
+      # ----------------------------
+      # Step 1: Configure Docker Repository
+      # ----------------------------
+      - name: Add Docker CE repository
+        run: |
+          sudo tee /etc/yum.repos.d/docker-ce.repo << EOF
+          [docker-ce-stable]
+          name=Docker CE Stable - \$basearch
+          baseurl=https://download.docker.com/linux/centos/\$releasever/\$basearch/stable
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://download.docker.com/linux/centos/gpg
+          EOF
+
+      # ----------------------------
+      # Step 2: Install Docker Components
+      # ----------------------------
+      - name: Install Docker packages
+        run: |
+          sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+      # ----------------------------
+      # Step 3: Download System Packages
+      # ----------------------------
+      - name: Define system packages
+        run: |
+          echo "SYSTEM_PACKAGES=util-linux nc net-tools openssl-libs glibc-common libseccomp fuse3-libs fuse-overlayfs slirp4netns" >> $GITHUB_ENV
+
+      - name: Download system packages
+        run: |
+          set -euo pipefail
+          packages=(${SYSTEM_PACKAGES// / })
+          
+          for pkg in "${packages[@]}"; do
+            echo "Downloading $pkg..."
+            # 使用 dnf 下载指定包
+            sudo dnf download --destdir="$TARGET_DIR/deps" --resolve "$pkg"
+          done
+
+      # ----------------------------
+      # Step 4: Merge & Compress
+      - name: Check if deps directory is empty
+        id: check_empty
+        run: |
+          if [ -z "$(ls -A $TARGET_DIR)" ]; then
+            echo "ERROR: No files found in $TARGET_DIR. Aborting compression." >&2
+            echo "is_empty=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_empty=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Add install script
+        run: |
+          cp centos-install.sh "$TARGET_DIR/deps/install.sh"  # 需提供对应的安装脚本
+          chmod +x "$TARGET_DIR/deps/install.sh"
+
+      - name: Compress deps directory
+        if: steps.check_empty.outputs.is_empty == 'false'
+        run: |
+          cd "$TARGET_DIR"
+          tar -czvf deps.tar.gz deps
+
+
+      - name: Upload artifact
+        if: steps.check_empty.outputs.is_empty == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: CentOS9-docker-system-deps
+          path: "$TARGET_DIR/deps.tar.gz"
+
+      # ----------------------------
+      # Step 4-6: Create Release (only if files exist)
+      # ----------------------------
+      - name: Generate release tag
+        if: steps.check_empty.outputs.is_empty == 'false'
+        id: generate_tag
+        run: |
+          RELEASE_TAG="CentOS9-deps-$(date +'%Y%m%d')"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        if: steps.check_empty.outputs.is_empty == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: CentOS9 Docker + System Dependencies (${{ env.RELEASE_TAG }})
+          body: |
+            📦 包含以下组件：
+            
+            - Docker CE 全家桶
+            - CentOS 9 系统工具包
+            
+            支持架构: amd64
+            
+            此 Release 由 GitHub Actions 自动生成。
+          files: |
+            ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+
+      # ----------------------------
+      # Step 7: Cleanup
+      # ----------------------------
+      - name: Cleanup
+        run: |
+          rm -rf "$TARGET_DIR"
