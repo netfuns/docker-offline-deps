@@ -30,18 +30,18 @@ jobs:
         run: |
           set -euo pipefail
           # CentOS Docker 官方仓库地址
-          BASE_URL="https://download.docker.com/linux/centos/${CENTOS_VERSION}/${ARCH}/stable/Packages/"
+          BASE_URL="https://download.docker.com/linux/centos/${CENTOS_VERSION}/${ARCH}/stable/Packages"
           
           # 获取仓库页面内容
           PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
           echo "DEBUG: 仓库页面内容预览:"
           echo "$PAGE_CONTENT" | head -n 20
 
-          # 提取指定包的最新版本（rpm 格式：包名-版本-Release.el9.x86_64.rpm）
+          # 提取指定包的最新版本（rpm 格式）
           get_latest() {
             local pkg="$1"
             # 匹配 rpm 包文件名格式
-            local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}-[0-9]+\.[0-9]+\.[0-9]+.*\.el9\.${ARCH}\.rpm\">" | cut -d'"' -f2)
+            local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}[^\"]+\">" | cut -d'"' -f2)
             
             if [ -z "$matches" ]; then
               echo "ERROR: 未找到 ${pkg} 的 rpm 包" >&2
