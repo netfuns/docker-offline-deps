@@ -100,11 +100,14 @@ jobs:
         with:
           name: ubuntu-24.04-docker-deps
           path: "$TARGET_DIR/deps.zip"
+      - name: Set release tag
+        run: echo "RELEASE_TAG=ubuntu-24.04-docker-packages-$(date +'%Y%m%d')" >> $GITHUB_ENV
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: ubuntu-24.04-docker-packages-$(date +%Y%m%d)
-          name: Ubuntu 24.04 Docker Packages $(date +%Y%m%d)
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
           body: |
             📦 Ubuntu 24.04 (Noble) Docker 组件包：
             
