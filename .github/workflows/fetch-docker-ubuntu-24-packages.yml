@@ -25,25 +25,33 @@ jobs:
         run: |
           set -euo pipefail
           BASE_URL="https://download.docker.com/linux/ubuntu/dists/${UBUNTU_CODENAME}/pool/stable/${ARCH}"
-
+          
           # 获取页面内容
-          PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" || echo "ERROR: Failed to fetch page")
+          PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
           echo "DEBUG: Repository page content:"
           echo "$PAGE_CONTENT" | head -n 20
 
-          # 精确匹配包链接的函数
+          # 精确提取包文件名的函数
           get_latest() {
             local pkg="$1"
-            # 匹配格式: <a href="package_name_version_arch.deb">package_name...</a>
-            echo "$PAGE_CONTENT" | grep -oP "<a href=\"\K${pkg}(_[^-]+)*-${ARCH}\.deb" | sort -Vr | head -n1
+            # 提取所有匹配的文件名
+            local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}[^\"]+\">" | cut -d'"' -f2)
+            
+            if [ -z "$matches" ]; then
+              echo "ERROR: No package found for ${pkg}" >&2
+              return 1
+            fi
+            
+            # 按版本号排序并取最新版本
+            echo "$matches" | sort -Vr | head -n1
           }
 
           # 获取各组件最新包文件名
-          CONTAINERD=$(get_latest "containerd.io") || { echo "Containerd not found"; exit 1; }
-          DOCKER_CE=$(get_latest "docker-ce") || { echo "Docker CE not found"; exit 1; }
-          CLI=$(get_latest "docker-ce-cli") || { echo "CLI not found"; exit 1; }
-          BUILDX_PLUGIN=$(get_latest "docker-buildx-plugin") || { echo "Buildx Plugin not found"; exit 1; }
-          COMPOSE_PLUGIN=$(get_latest "docker-compose-plugin") || { echo "Compose Plugin not found"; exit 1; }
+          CONTAINERD=$(get_latest "containerd.io") || exit 1
+          DOCKER_CE=$(get_latest "docker-ce") || exit 1
+          CLI=$(get_latest "docker-ce-cli") || exit 1
+          BUILDX_PLUGIN=$(get_latest "docker-buildx-plugin") || exit 1
+          COMPOSE_PLUGIN=$(get_latest "docker-compose-plugin") || exit 1
 
           # 输出完整下载URL
           echo "CONTAINERD_URL=${BASE_URL}/${CONTAINERD}" >> $GITHUB_OUTPUT
