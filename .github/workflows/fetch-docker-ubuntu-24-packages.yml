@@ -8,6 +8,7 @@ on:
 env:
   UBUNTU_CODENAME: noble   # 固定为 Ubuntu 24.04
   TARGET_DIR: deps         # 解压目标目录
+  ARCH: amd64              # 固定架构为 amd64
 
 jobs:
   build:
@@ -23,65 +24,63 @@ jobs:
         id: package_urls
         run: |
           set -euo pipefail
-          ARCH=$(dpkg --print-architecture)
-          BASE_URL="https://download.docker.com/linux/ubuntu/dists/${UBUNTU_CODENAME}/pool/stable/$ARCH"
+          BASE_URL="https://download.docker.com/linux/ubuntu/dists/${UBUNTU_CODENAME}/pool/stable/${ARCH}"
 
-          # 获取页面内容（添加调试输出）
+          # 获取页面内容
           PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" || echo "ERROR: Failed to fetch page")
           echo "DEBUG: Repository page content:"
-          echo "$PAGE_CONTENT" | head -n 50  # 输出前50行便于调试
+          echo "$PAGE_CONTENT" | head -n 20
 
-          # 增强的正则表达式匹配逻辑
+          # 精确匹配包链接的函数
           get_latest() {
             local pkg="$1"
-            local pkg_dir="/$pkg/"
-            
-            # 匹配类似 /containerd.io/1.6.24-1~ubuntu.24.04~noble1_amd64.deb 的路径
-            echo "$PAGE_CONTENT" | grep -oP "href=\"\\K${pkg_dir}[^\"]+_${ARCH}\.deb"
+            # 匹配格式: <a href="package_name_version_arch.deb">package_name...</a>
+            echo "$PAGE_CONTENT" | grep -oP "<a href=\"\K${pkg}(_[^-]+)*-${ARCH}\.deb" | sort -Vr | head -n1
           }
 
-          # 获取各组件最新包链接
-          CONTAINERD=$(get_latest containerd.io) || { echo "Containerd not found"; exit 1; }
-          DOCKER_CE=$(get_latest docker-ce)       || { echo "Docker CE not found"; exit 1; }
-          CLI=$(get_latest docker-ce-cli)         || { echo "CLI not found"; exit 1; }
-          BUILDX_PLUGIN=$(get_latest docker-buildx-plugin) || { echo "Buildx Plugin not found"; exit 1; }
-          COMPOSE_PLUGIN=$(get_latest docker-compose-plugin) || { echo "Compose Plugin not found"; exit 1; }
+          # 获取各组件最新包文件名
+          CONTAINERD=$(get_latest "containerd.io") || { echo "Containerd not found"; exit 1; }
+          DOCKER_CE=$(get_latest "docker-ce") || { echo "Docker CE not found"; exit 1; }
+          CLI=$(get_latest "docker-ce-cli") || { echo "CLI not found"; exit 1; }
+          BUILDX_PLUGIN=$(get_latest "docker-buildx-plugin") || { echo "Buildx Plugin not found"; exit 1; }
+          COMPOSE_PLUGIN=$(get_latest "docker-compose-plugin") || { echo "Compose Plugin not found"; exit 1; }
 
-          # 输出到 GitHub Actions 环境变量
-          echo "CONTAINERD_URL=$CONTAINERD" >> $GITHUB_OUTPUT
-          echo "DOCKER_CE_URL=$DOCKER_CE" >> $GITHUB_OUTPUT
-          echo "CLI_URL=$CLI" >> $GITHUB_OUTPUT
-          echo "BUILDX_PLUGIN_URL=$BUILDX_PLUGIN" >> $GITHUB_OUTPUT
-          echo "COMPOSE_PLUGIN_URL=$COMPOSE_PLUGIN" >> $GITHUB_OUTPUT
+          # 输出完整下载URL
+          echo "CONTAINERD_URL=${BASE_URL}/${CONTAINERD}" >> $GITHUB_OUTPUT
+          echo "DOCKER_CE_URL=${BASE_URL}/${DOCKER_CE}" >> $GITHUB_OUTPUT
+          echo "CLI_URL=${BASE_URL}/${CLI}" >> $GITHUB_OUTPUT
+          echo "BUILDX_PLUGIN_URL=${BASE_URL}/${BUILDX_PLUGIN}" >> $GITHUB_OUTPUT
+          echo "COMPOSE_PLUGIN_URL=${BASE_URL}/${COMPOSE_PLUGIN}" >> $GITHUB_OUTPUT
+
+          # 调试输出
+          echo "DEBUG: Found packages:"
+          echo "Containerd: $CONTAINERD"
+          echo "Docker CE: $DOCKER_CE"
+          echo "CLI: $CLI"
+          echo "Buildx: $BUILDX_PLUGIN"
+          echo "Compose: $COMPOSE_PLUGIN"
 
       - name: Download packages
         run: |
           set -euo pipefail
-          mkdir -p "$TARGET_DIR"
-          cd "$TARGET_DIR"
-
+          mkdir -p "$TARGET_DIR/deps"
+          
           # 下载所有组件
-          curl -fsSL "${{ steps.package_urls.outputs.CONTAINERD_URL }}" -o containerd.deb
-          curl -fsSL "${{ steps.package_urls.outputs.DOCKER_CE_URL }}" -o docker-ce.deb
-          curl -fsSL "${{ steps.package_urls.outputs.CLI_URL }}" -o docker-ce-cli.deb
-          curl -fsSL "${{ steps.package_urls.outputs.BUILDX_PLUGIN_URL }}" -o docker-buildx-plugin.deb
-          curl -fsSL "${{ steps.package_urls.outputs.COMPOSE_PLUGIN_URL }}" -o docker-compose-plugin.deb
+          curl -fsSL "${{ steps.package_urls.outputs.CONTAINERD_URL }}" -o "$TARGET_DIR/deps/containerd.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.DOCKER_CE_URL }}" -o "$TARGET_DIR/deps/docker-ce.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.CLI_URL }}" -o "$TARGET_DIR/deps/docker-ce-cli.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.BUILDX_PLUGIN_URL }}" -o "$TARGET_DIR/deps/docker-buildx-plugin.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.COMPOSE_PLUGIN_URL }}" -o "$TARGET_DIR/deps/docker-compose-plugin.deb"
 
       - name: Verify downloaded files
         run: |
-          ls -lR "$TARGET_DIR"
-          echo "Found packages:"
-          echo "-----------------"
-          echo "- containerd.deb"
-          echo "- docker-ce.deb"
-          echo "- docker-ce-cli.deb"
-          echo "- docker-buildx-plugin.deb"
-          echo "- docker-compose-plugin.deb"
-
-      - name: Create deps directory structure
-        run: |
-          mkdir -p "$TARGET_DIR/deps"
-          mv *.deb "$TARGET_DIR/deps/"
+          ls -lR "$TARGET_DIR/deps"
+          echo "Package versions:"
+          dpkg-deb -f "$TARGET_DIR/deps/containerd.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/docker-ce.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/docker-ce-cli.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/docker-buildx-plugin.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/docker-compose-plugin.deb" Package Version
 
       - name: Compress deps directory
         run: |
@@ -108,8 +107,8 @@ jobs:
             - docker-buildx-plugin
             - docker-compose-plugin
             
-            包含架构：$(dpkg --print-architecture)
+            包含架构: amd64
           files: |
-            ${{ github.workspace }}/ubuntu-24.04-docker-deps/deps.zip
+            ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
