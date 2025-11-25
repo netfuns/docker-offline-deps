@@ -28,7 +28,7 @@ jobs:
         run: |
           mkdir -p $TARGET_DIR
           docker create --name temp-container oraclelinux9-builder
-          docker cp temp-container:/dep.tar.gz "$TARGET_DIR/deps.tar.gz"
+          docker cp temp-container:/tmp.tar.gz "$TARGET_DIR/deps.tar.gz"
           docker rm temp-container
 
       - name: Check if deps directory is empty
