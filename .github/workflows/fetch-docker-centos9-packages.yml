@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           # CentOS Docker 官方仓库地址
-          BASE_URL="https://download.docker.com/linux/centos/${CENTOS_VERSION}/${ARCH}/stable"
+          BASE_URL="https://download.docker.com/linux/centos/${CENTOS_VERSION}/${ARCH}/stable/Packages/"
           
           # 获取仓库页面内容
           PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
