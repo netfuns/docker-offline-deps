@@ -6,7 +6,7 @@ on:
     - cron: '0 2 * * *' # 每天 02:00 UTC 自动运行（可按需调整）
 
 permissions:
-  contents: write # 允许创建 Release 与上传资产
+  contents: write # 允许创建 Release 和上传资产
 
 env:
   UBUNTU_CODENAME: noble   # Ubuntu 24.04
@@ -26,17 +26,18 @@ jobs:
         id: ubuntu_urls
         run: |
           set -euo pipefail
-          ARCH=$(dpkg --print-architecture) # amd64|arm64
+          ARCH=$(dpkg --print-architecture) # 获取系统架构（如 amd64/arm64）
           BASE="https://download.docker.com/linux/ubuntu/dists/${{ env.UBUNTU_CODENAME }}/pool/stable/$ARCH"
           echo "BASE=$BASE" >> "$GITHUB_OUTPUT"
 
-          # 索引页解析出各包的最新版本目录（按文件名排序取最新）
+          # 解析最新版本包的函数
           latest() {
             curl -fsSL "$BASE/" \
               | grep -oP 'href="\K[^"]+'"$1"'(?=_'"$ARCH"'\.deb)' \
               | sort -Vr | head -n1
           }
 
+          # 获取各包最新版本链接
           echo "containerd=$(latest containerd.io)" >> "$GITHUB_OUTPUT"
           echo "docker_ce=$(latest docker-ce)" >> "$GITHUB_OUTPUT"
           echo "docker_ce_cli=$(latest docker-ce-cli)" >> "$GITHUB_OUTPUT"
@@ -46,9 +47,12 @@ jobs:
       - name: Download Ubuntu packages
         run: |
           set -euo pipefail
-          mkdir -p "ubuntu-${{ env.UBUNTU_CODENAME }}-$ARCH"
-          cd "ubuntu-${{ env.UBUNTU_CODENAME }}-$ARCH"
+          ARCH=$(dpkg --print-architecture) # 再次确保 ARCH 可用
+          PKG_DIR="ubuntu-${{ env.UBUNTU_CODENAME }}-$ARCH"
+          mkdir -p "$PKG_DIR"
+          cd "$PKG_DIR"
 
+          # 下载所有包
           curl -fsSL "${{ steps.ubuntu_urls.outputs.BASE }}/${{ steps.ubuntu_urls.outputs.containerd }}" -o "containerd.io_${ARCH}.deb"
           curl -fsSL "${{ steps.ubuntu_urls.outputs.BASE }}/${{ steps.ubuntu_urls.outputs.docker_ce }}" -o "docker-ce_${ARCH}.deb"
           curl -fsSL "${{ steps.ubuntu_urls.outputs.BASE }}/${{ steps.ubuntu_urls.outputs.docker_ce_cli }}" -o "docker-ce-cli_${ARCH}.deb"
@@ -58,8 +62,8 @@ jobs:
       - name: Upload Ubuntu artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-${{ env.UBUNTU_CODENAME }}-$ARCH
-          path: ubuntu-${{ env.UBUNTU_CODENAME }}-$ARCH
+          name: $PKG_DIR
+          path: $PKG_DIR
 
   centos-stream-9:
     runs-on: ubuntu-latest
@@ -74,17 +78,18 @@ jobs:
         id: centos_urls
         run: |
           set -euo pipefail
-          ARCH=$(uname -m) # x86_64|aarch64
+          ARCH=$(uname -m) # 获取系统架构（如 x86_64/aarch64）
           BASE="https://download.docker.com/linux/centos/${{ env.CENTOS_STREAM_VER }}/$ARCH/stable/Packages"
           echo "BASE=$BASE" >> "$GITHUB_OUTPUT"
 
-          # 索引页解析出各包的最新版本（按文件名排序取最新）
+          # 解析最新版本包的函数
           latest() {
             curl -fsSL "$BASE/" \
-              | grep -oP 'href="\K[^"]+'"$1"'(?-\d+\.'"$ARCH"'\.rpm)' \
+              | grep -oP 'href="\K[^"]+'"$1"'(?=-'"$ARCH"'\.rpm)' \
               | sort -Vr | head -n1
           }
 
+          # 获取各包最新版本链接
           echo "containerd=$(latest containerd.io)" >> "$GITHUB_OUTPUT"
           echo "docker_ce=$(latest docker-ce)" >> "$GITHUB_OUTPUT"
           echo "docker_ce_cli=$(latest docker-ce-cli)" >> "$GITHUB_OUTPUT"
@@ -92,24 +97,27 @@ jobs:
           echo "docker_compose_plugin=$(latest docker-compose-plugin)" >> "$GITHUB_OUTPUT"
           echo "docker_ce_rootless_extras=$(latest docker-ce-rootless-extras)" >> "$GITHUB_OUTPUT"
 
-      - name: Download CentOS Stream packages
+      - name: Download CentOS packages
         run: |
           set -euo pipefail
-          mkdir -p "centos-stream-${{ env.CENTOS_STREAM_VER }}-$ARCH"
-          cd "centos-stream-${{ env.CENTOS_STREAM_VER }}-$ARCH"
+          ARCH=$(uname -m)
+          PKG_DIR="centos-stream-${{ env.CENTOS_STREAM_VER }}-$ARCH"
+          mkdir -p "$PKG_DIR"
+          cd "$PKG_DIR"
 
+          # 下载所有包
           curl -fsSL "${{ steps.centos_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.containerd }}" -o "containerd.io.rpm"
           curl -fsSL "${{ steps.centos_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.docker_ce }}" -o "docker-ce.rpm"
           curl -fsSL "${{ steps.centos_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.docker_ce_cli }}" -o "docker-ce-cli.rpm"
           curl -fsSL "${{ steps.centos_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.docker_buildx_plugin }}" -o "docker-buildx-plugin.rpm"
-          curl -fsSL "${{ steps.ubuntu_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.docker_compose_plugin }}" -o "docker-compose-plugin.rpm"
+          curl -fsSL "${{ steps.centos_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.docker_compose_plugin }}" -o "docker-compose-plugin.rpm"
           curl -fsSL "${{ steps.centos_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.docker_ce_rootless_extras }}" -o "docker-ce-rootless-extras.rpm"
 
       - name: Upload CentOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: centos-stream-${{ env.CENTOS_STREAM_VER }}-$ARCH
-          path: centos-stream-${{ env.CENTOS_STREAM_VER }}-$ARCH
+          name: $PKG_DIR
+          path: $PKG_DIR
 
   release:
     needs: [ubuntu-noble, centos-stream-9]
@@ -120,27 +128,37 @@ jobs:
         with:
           path: pkgs
 
-      - name: Create zip per system
+      - name: Create zip archives
         run: |
           set -euo pipefail
           cd pkgs
-          for d in */; do
-            zip -r "${d%/}.zip" "$d"
+          for dir in */; do
+            zip -r "${dir%/}.zip" "$dir"
           done
 
       - name: Generate release tag
         id: tag
-        run: echo "TAG=docker-packages-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+        run: echo "RELEASE_TAG=docker-packages-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release and upload assets
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.TAG }}
-          name: Docker Packages ${{ steps.tag.outputs.TAG }}
+          tag_name: ${{ steps.tag.outputs.RELEASE_TAG }}
+          name: Docker Packages ${{ steps.tag.outputs.RELEASE_TAG }}
           body: |
-            Auto-collected latest Docker packages for:
-            - Ubuntu **${{ env.UBUNTU_CODENAME }}** (${{ steps.ubuntu-noble.outputs.ARCH }})
-            - CentOS Stream **${{ env.CENTOS_STREAM_VER }}** (${{ steps.centos-stream-9.outputs.ARCH }})
+            📦 自动化构建的 Docker 最新包集合：
+            
+            - **Ubuntu {{ env.UBUNTU_CODENAME }}** (Architecture: ${{ steps.ubuntu-noble.outputs.ARCH }})
+            - **CentOS Stream {{ env.CENTOS_STREAM_VER }}** (Architecture: ${{ steps.centos-stream-9.outputs.ARCH }})
+            
+            包含组件：
+            - containerd.io
+            - docker-ce
+            - docker-ce-cli
+            - docker-buildx-plugin
+            - docker-compose-plugin
+            - docker-ce-rootless-extras (仅 CentOS)
+
           files: |
             pkgs/*.zip
         env:
