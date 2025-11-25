@@ -75,34 +75,41 @@ jobs:
           mkdir -p "$TARGET_DIR/system"
           packages=(${SYSTEM_PACKAGES// / })
           
-          # 修复后的Packages.gz下载URL
-          PACKAGES_GZ_URL="https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/Packages.gz"
-          curl -fsSL "$PACKAGES_GZ_URL" -o Packages.gz || { echo "Failed to download Packages.gz"; exit 1; }
-          gunzip -c Packages.gz > Packages || { echo "Failed to extract Packages"; exit 1; }
-
-          # 解析Packages文件并下载对应包
-          while IFS= read -r line; do
-            if [[ "$line" == *"Package: "* ]]; then
-              pkg=$(echo "$line" | awk '{print $2}')
-            elif [[ "$line" == *"Filename: "* ]]; then
-              file=$(echo "$line" | awk '{print $2}')
-              if [[ " ${packages[*]} " =~ " ${pkg} " ]]; then
-                # 修复后的单个包下载URL
-                FILE_URL="https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/$file"
-                curl -fsSL "$FILE_URL" -o "$TARGET_DIR/system/$pkg.deb" || { echo "Failed to download $pkg"; exit 1; }
-                packages=(${packages[@]/$pkg})  # 移除已处理的包
+          # 遍历所有可能的仓库子目录
+          REPOS=("main" "updates" "security")
+          for repo in "${REPOS[@]}"; do
+            # 下载Packages.gz文件
+            PACKAGES_GZ_URL="https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/${repo}/binary-${ARCH}/Packages.gz"
+            echo "Trying repository: $repo"
+            curl -fsSL "$PACKAGES_GZ_URL" -o Packages.gz || continue
+            gunzip -c Packages.gz > Packages || continue
+            
+            # 解析Packages文件并下载对应包
+            while IFS= read -r line; do
+              if [[ "$line" == *"Package: "* ]]; then
+                pkg=$(echo "$line" | awk '{print $2}')
+              elif [[ "$line" == *"Filename: "* ]]; then
+                file=$(echo "$line" | awk '{print $2}')
+                if [[ " ${packages[*]} " =~ " ${pkg} " ]]; then
+                  # 构建完整下载URL
+                  FILE_URL="https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/${repo}/binary-${ARCH}/$file"
+                  echo "Downloading $pkg from $repo repository..."
+                  curl -fsSL "$FILE_URL" -o "$TARGET_DIR/system/$pkg.deb" || { echo "Failed to download $pkg"; exit 1; }
+                  packages=(${packages[@]/$pkg})  # 移除已处理的包
+                fi
               fi
-            fi
-          done < Packages
+            done < Packages
+            
+            # 清理临时文件
+            rm -f Packages Packages.gz
+            if [ ${#packages[@]} -eq 0 ]; then break; fi
+          done
 
           # 检查是否有未找到的包
           if [ ${#packages[@]} -ne 0 ]; then
             echo "ERROR: Missing packages: ${packages[@]}" >&2
             exit 1
           fi
-
-          # 清理临时文件
-          rm -f Packages Packages.gz
 
       # ----------------------------
       # Step 3: Merge & Compress
