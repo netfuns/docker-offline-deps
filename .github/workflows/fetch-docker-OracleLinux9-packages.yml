@@ -1,4 +1,4 @@
-name: Build OracleLinux9 Dependencies
+name: Build & Release OracleLinux9 Dependencies
 
 on:
   push:
@@ -7,6 +7,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      has_deps: ${{ steps.build_deps.outputs.success }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -16,42 +18,46 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t oraclelinux9-builder -f Oraclelinux9-Dockerfile .
+          docker build -t oraclelinux9-builder -f Dockerfile .
 
       - name: Extract dependencies
-        id: extract
+        id: build_deps
         run: |
           docker create --name temp-container oraclelinux9-builder
           docker cp temp-container:/deps.tar.gz .
           docker rm temp-container
+          echo "::set-output name=success::$(test -f deps.tar.gz && echo 'true' || echo 'false')"
 
-      - name: Generate version metadata
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: needs.build.outputs.has_deps == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate version tag
         id: version
         run: |
-          echo "Version: $(date +%Y%m%d)-$(git rev-parse --short HEAD)" > version.txt
-          echo "Build Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> version.txt
+          git fetch --tags
+          LATEST_TAG=$(git describe --tags `git rev-list --tags --max-count=1` | sed 's/^v//')
+          echo "RELEASE_TAG=$LATEST_TAG" >> $GITHUB_ENV
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref }}
-          name: Release ${{ github.ref }}
-          body_path: ./OracleLinux9_RELEASE_NOTES.md
-          draft: false
-          prerelease: false
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: oraclelinux9-deps
-          path: |
-            deps.tar.gz
-            version.txt
-
-      - name: Append build info to release
-        run: |
-          echo "## Build Information" >> RELEASE_NOTES.md
-          echo "" >> OracleLinux9_RELEASE_NOTES.md
-          echo "Compiled Date: $(date -u '+%Y-%m-%d %H:%M:%S %Z')" >> OracleLinux9_RELEASE_NOTES.md
-          echo "Git Commit: $(git rev-parse HEAD)" >> OracleLinux9_RELEASE_NOTES.md
-          echo "Artifact SHA256: $(sha256sum deps.tar.gz | awk '{print $1}')" >> OracleLinux9_RELEASE_NOTES.md
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Oracle Linux 9 System Dependencies (${{ env.RELEASE_TAG }})
+          body: |
+            📦 包含以下组件：
+            
+            - Docker CE 全家桶
+            - Oracle Linux 9 系统工具包
+            
+            支持架构: amd64
+            
+            此 Release 由 GitHub Actions 自动生成。
+          files: |
+            ${{ github.workspace }}/deps.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
