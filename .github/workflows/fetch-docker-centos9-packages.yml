@@ -41,7 +41,7 @@ jobs:
           get_latest() {
             local pkg="$1"
             # 匹配 rpm 包文件名格式
-            local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}[^\"]+\">" | cut -d'"' -f2)
+            local matches=$(echo "$PAGE_CONTENT" | grep -oE "${pkg}" | cut -d'"' -f2)
             
             if [ -z "$matches" ]; then
               echo "ERROR: No package found for ${pkg}" >&2
