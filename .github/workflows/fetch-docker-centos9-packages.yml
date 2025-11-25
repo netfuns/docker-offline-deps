@@ -6,7 +6,7 @@ on:
     - cron: '0 1 1 * *'  # 每月1号 01:00 UTC 自动运行
 
 env:
-  CENTOS_VERSION: 9-stream  # CentOS 9 Stream
+  CENTOS_VERSION: 9  # CentOS 9 Stream
   TARGET_DIR: deps          # 统一解压目标目录
   ARCH: x86_64              # CentOS 架构（x86_64 对应 amd64）
 
