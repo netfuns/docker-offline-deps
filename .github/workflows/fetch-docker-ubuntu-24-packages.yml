@@ -23,49 +23,38 @@ jobs:
       # ----------------------------
       # Step 1: Download Docker Components
       # ----------------------------
-      - name: Fetch Docker package URLs
-        id: docker_urls
+      - name: Fetch latest Docker package URLs
+        id: package_urls
         run: |
           set -euo pipefail
           BASE_URL="https://download.docker.com/linux/ubuntu/dists/${UBUNTU_CODENAME}/pool/stable/${ARCH}"
           
-          echo "DEBUG: Fetching page content from $BASE_URL/"
-          # 使用 -L 处理重定向，增加 --retry 应对临时网络问题
-          PAGE_CONTENT=$(curl -fsSL -L --retry 3 "$BASE_URL/" | tr -d '\r')
-          
+          # 获取页面内容
+          PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
+          echo "DEBUG: Repository page content:"
+          echo "$PAGE_CONTENT" | head -n 20
+
           # 精确提取包文件名的函数
           get_latest() {
             local pkg="$1"
-            echo "DEBUG: Trying to find latest package for: $pkg"
-            
-            # 使用更健壮的正则表达式
-            # 1. 匹配 <a href="..."> 标签
-            # 2. 捕获以 $pkg 开头并以 .deb 结尾的完整文件名
-            # 3. 使用 sed 提取 href 属性的值，这比 grep + cut 更可靠
-            local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}[^\"]+\.deb\">" | sed -n 's/.*href="\([^"]*\)".*/\1/p')
+            # 提取所有匹配的文件名
+            local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}[^\"]+\">" | cut -d'"' -f2)
             
             if [ -z "$matches" ]; then
-              echo "ERROR: No package found for $pkg" >&2
-              echo "ERROR: Please check if the package name is correct." >&2
-              exit 1
+              echo "ERROR: No package found for ${pkg}" >&2
+              return 1
             fi
             
-            # 输出所有匹配到的结果，方便调试
-            echo "DEBUG: All found matches for $pkg:"
-            echo "$matches"
-            
             # 按版本号排序并取最新版本
-            local latest=$(echo "$matches" | sort -Vr | head -n1)
-            echo "DEBUG: Latest version for $pkg is: $latest"
-            echo "$latest"
+            echo "$matches" | sort -Vr | head -n1
           }
 
           # 获取各组件最新包文件名
-          CONTAINERD=$(get_latest "containerd.io")
-          DOCKER_CE=$(get_latest "docker-ce")
-          CLI=$(get_latest "docker-ce-cli")
-          BUILDX_PLUGIN=$(get_latest "docker-buildx-plugin")
-          COMPOSE_PLUGIN=$(get_latest "docker-compose-plugin")
+          CONTAINERD=$(get_latest "containerd.io") || exit 1
+          DOCKER_CE=$(get_latest "docker-ce") || exit 1
+          CLI=$(get_latest "docker-ce-cli") || exit 1
+          BUILDX_PLUGIN=$(get_latest "docker-buildx-plugin") || exit 1
+          COMPOSE_PLUGIN=$(get_latest "docker-compose-plugin") || exit 1
 
           # 输出完整下载URL
           echo "CONTAINERD_URL=${BASE_URL}/${CONTAINERD}" >> $GITHUB_OUTPUT
@@ -74,25 +63,36 @@ jobs:
           echo "BUILDX_PLUGIN_URL=${BASE_URL}/${BUILDX_PLUGIN}" >> $GITHUB_OUTPUT
           echo "COMPOSE_PLUGIN_URL=${BASE_URL}/${COMPOSE_PLUGIN}" >> $GITHUB_OUTPUT
 
-      - name: Download Docker packages
+          # 调试输出
+          echo "DEBUG: Found packages:"
+          echo "Containerd: $CONTAINERD"
+          echo "Docker CE: $DOCKER_CE"
+          echo "CLI: $CLI"
+          echo "Buildx: $BUILDX_PLUGIN"
+          echo "Compose: $COMPOSE_PLUGIN"
+
+      - name: Download packages
         run: |
           set -euo pipefail
-          # 创建 docker 子目录
-          mkdir -p "$TARGET_DIR/docker"
+          mkdir -p "$TARGET_DIR/deps"
           
-          # 从上个步骤的输出中获取 URL 并下载
-          echo "Downloading Docker packages..."
-          curl -fsSL "${{ steps.docker_urls.outputs.CONTAINERD_URL }}" -o "$TARGET_DIR/docker/containerd.io.deb"
-          curl -fsSL "${{ steps.docker_urls.outputs.DOCKER_CE_URL }}" -o "$TARGET_DIR/docker/docker-ce.deb"
-          curl -fsSL "${{ steps.docker_urls.outputs.CLI_URL }}" -o "$TARGET_DIR/docker/docker-ce-cli.deb"
-          curl -fsSL "${{ steps.docker_urls.outputs.BUILDX_PLUGIN_URL }}" -o "$TARGET_DIR/docker/docker-buildx-plugin.deb"
-          curl -fsSL "${{ steps.docker_urls.outputs.COMPOSE_PLUGIN_URL }}" -o "$TARGET_DIR/docker/docker-compose-plugin.deb"
-          
-          # 调试：列出下载的文件
-          echo "Docker packages downloaded:"
-          ls -la "$TARGET_DIR/docker/"
-          mkdir -p "$TARGET_DIR/deps/"
-          mv "$TARGET_DIR/docker/*" "$TARGET_DIR/deps/"
+          # 下载所有组件
+          curl -fsSL "${{ steps.package_urls.outputs.CONTAINERD_URL }}" -o "$TARGET_DIR/deps/containerd.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.DOCKER_CE_URL }}" -o "$TARGET_DIR/deps/docker-ce.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.CLI_URL }}" -o "$TARGET_DIR/deps/docker-ce-cli.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.BUILDX_PLUGIN_URL }}" -o "$TARGET_DIR/deps/docker-buildx-plugin.deb"
+          curl -fsSL "${{ steps.package_urls.outputs.COMPOSE_PLUGIN_URL }}" -o "$TARGET_DIR/deps/docker-compose-plugin.deb"
+
+      - name: Verify downloaded files
+        run: |
+          ls -lR "$TARGET_DIR/deps"
+          echo "Package versions:"
+          dpkg-deb -f "$TARGET_DIR/deps/containerd.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/docker-ce.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/docker-ce-cli.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/docker-buildx-plugin.deb" Package Version
+          dpkg-deb -f "$TARGET_DIR/deps/docker-compose-plugin.deb" Package Version
+      
 
       # ----------------------------
       # Step 2: Download Ubuntu System Packages
