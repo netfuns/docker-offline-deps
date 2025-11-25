@@ -188,9 +188,9 @@ jobs:
             exit 1
           fi
           # 复制脚本到目标目录
-          cp ubuntu24-install.sh "$TARGET_DIR/deps/"
+          cp ubuntu24-install.sh "$TARGET_DIR/deps/install.sh"
           # 给脚本添加执行权限
-          chmod +x "$TARGET_DIR/deps/ubuntu24-install.sh"
+          chmod +x "$TARGET_DIR/deps/install.sh"
           echo "Successfully added ubuntu24-install.sh to $TARGET_DIR/deps/"
           ls -la "$TARGET_DIR/deps/"
           
