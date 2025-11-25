@@ -24,7 +24,7 @@ jobs:
         id: build_deps
         run: |
           docker create --name temp-container oraclelinux9-builder
-          docker cp temp-container:/deps.tar.gz .
+          docker cp temp-container:/dep.tar.gz ./deps.tar.gz
           docker rm temp-container
           echo "::set-output name=success::$(test -f deps.tar.gz && echo 'true' || echo 'false')"
 
