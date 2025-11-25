@@ -18,7 +18,7 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t oraclelinux9-builder -f Dockerfile .
+          docker build -t oraclelinux9-builder -f Oraclelinux9-Dockerfile .
 
       - name: Extract dependencies
         id: build_deps
@@ -36,12 +36,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Generate version tag
-        id: version
+      - name: Generate release tag
+        if: steps.check_empty.outputs.is_empty == 'false'
+        id: generate_tag
         run: |
-          git fetch --tags
-          LATEST_TAG=$(git describe --tags `git rev-list --tags --max-count=1` | sed 's/^v//')
-          echo "RELEASE_TAG=$LATEST_TAG" >> $GITHUB_ENV
+          RELEASE_TAG="oraclelinux9-deps-$(date +'%Y%m%d')"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
