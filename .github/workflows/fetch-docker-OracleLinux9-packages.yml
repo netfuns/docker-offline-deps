@@ -1,8 +1,9 @@
 name: Build & Release OracleLinux9 Dependencies
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 1 1 * *' # 每月1号 01:00 UTC 自动运行
 
 jobs:
   build:
@@ -28,13 +29,12 @@ jobs:
           docker rm temp-container
           echo "::set-output name=success::$(test -f deps.tar.gz && echo 'true' || echo 'false')"
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    if: needs.build.outputs.has_deps == 'true'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Upload artifact
+        if: steps.check_empty.outputs.is_empty == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-24.04-docker-system-deps
+          path: "./deps.tar.gz"
 
       - name: Generate release tag
         if: steps.check_empty.outputs.is_empty == 'false'
@@ -59,6 +59,6 @@ jobs:
             
             此 Release 由 GitHub Actions 自动生成。
           files: |
-            ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.tar.gz
+            ${{ github.workspace }}/deps.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
