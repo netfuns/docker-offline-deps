@@ -6,14 +6,112 @@ on:
     - cron: '0 2 * * *' # 每天 02:00 UTC 自动运行
 
 permissions:
-  contents: write
+  contents: write # 允许创建 Release 和上传资产
 
 env:
-  UBUNTU_CODENAME: noble
-  CENTOS_STREAM_VER: 9
+  UBUNTU_CODENAME: noble   # Ubuntu 24.04
+  CENTOS_STREAM_VER: 9     # CentOS Stream 9
 
 jobs:
-  # ...（ubuntu-noble 和 centos-stream-9 job 保持不变）...
+  ubuntu-noble:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ca-certificates curl jq
+
+      - name: Fetch latest .deb URLs for Ubuntu ${{ env.UBUNTU_CODENAME }}
+        id: ubuntu_urls
+        run: |
+          set -euo pipefail
+          ARCH=$(dpkg --print-architecture)
+          BASE="https://download.docker.com/linux/ubuntu/dists/${{ env.UBUNTU_CODENAME }}/pool/stable/$ARCH"
+          echo "BASE=$BASE" >> "$GITHUB_OUTPUT"
+
+          latest() {
+            curl -fsSL "$BASE/" \
+              | grep -oP 'href="\K[^"]+'"$1"'(?=_'"$ARCH"'\.deb)' \
+              | sort -Vr | head -n1
+          }
+
+          echo "containerd=$(latest containerd.io)" >> "$GITHUB_OUTPUT"
+          echo "docker_ce=$(latest docker-ce)" >> "$GITHUB_OUTPUT"
+          echo "docker_ce_cli=$(latest docker-ce-cli)" >> "$GITHUB_OUTPUT"
+          echo "docker_buildx_plugin=$(latest docker-buildx-plugin)" >> "$GITHUB_OUTPUT"
+          echo "docker_compose_plugin=$(latest docker-compose-plugin)" >> "$GITHUB_OUTPUT"
+
+      - name: Download Ubuntu packages
+        run: |
+          set -euo pipefail
+          ARCH=$(dpkg --print-architecture)
+          PKG_DIR="ubuntu-${{ env.UBUNTU_CODENAME }}-$ARCH"
+          mkdir -p "$PKG_DIR"
+          cd "$PKG_DIR"
+
+          curl -fsSL "${{ steps.ubuntu_urls.outputs.BASE }}/${{ steps.ubuntu_urls.outputs.containerd }}" -o "containerd.io_${ARCH}.deb"
+          curl -fsSL "${{ steps.ubuntu_urls.outputs.BASE }}/${{ steps.ubuntu_urls.outputs.docker_ce }}" -o "docker-ce_${ARCH}.deb"
+          curl -fsSL "${{ steps.ubuntu_urls.outputs.BASE }}/${{ steps.ubuntu_urls.outputs.docker_ce_cli }}" -o "docker-ce-cli_${ARCH}.deb"
+          curl -fsSL "${{ steps.ubuntu_urls.outputs.BASE }}/${{ steps.ubuntu_urls.outputs.docker_buildx_plugin }}" -o "docker-buildx-plugin_${ARCH}.deb"
+          curl -fsSL "${{ steps.ubuntu_urls.outputs.BASE }}/${{ steps.ubuntu_urls.outputs.docker_compose_plugin }}" -o "docker-compose-plugin_${ARCH}.deb"
+
+      - name: Upload Ubuntu artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: $PKG_DIR
+          path: $PKG_DIR
+
+  centos-stream-9:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ca-certificates curl jq rpm2cpio cpio
+
+      - name: Fetch latest .rpm URLs for CentOS Stream ${{ env.CENTOS_STREAM_VER }}
+        id: centos_urls
+        run: |
+          set -euo pipefail
+          ARCH=$(uname -m)
+          BASE="https://download.docker.com/linux/centos/${{ env.CENTOS_STREAM_VER }}/$ARCH/stable/Packages"
+          echo "BASE=$BASE" >> "$GITHUB_OUTPUT"
+
+          latest() {
+            curl -fsSL "$BASE/" \
+              | grep -oP 'href="\K[^"]+'"$1"'(?=-'"$ARCH"'\.rpm)' \
+              | sort -Vr | head -n1
+          }
+
+          echo "containerd=$(latest containerd.io)" >> "$GITHUB_OUTPUT"
+          echo "docker_ce=$(latest docker-ce)" >> "$GITHUB_OUTPUT"
+          echo "docker_ce_cli=$(latest docker-ce-cli)" >> "$GITHUB_OUTPUT"
+          echo "docker_buildx_plugin=$(latest docker-buildx-plugin)" >> "$GITHUB_OUTPUT"
+          echo "docker_compose_plugin=$(latest docker-compose-plugin)" >> "$GITHUB_OUTPUT"
+          echo "docker_ce_rootless_extras=$(latest docker-ce-rootless-extras)" >> "$GITHUB_OUTPUT"
+
+      - name: Download CentOS packages
+        run: |
+          set -euo pipefail
+          ARCH=$(uname -m)
+          PKG_DIR="centos-stream-${{ env.CENTOS_STREAM_VER }}-$ARCH"
+          mkdir -p "$PKG_DIR"
+          cd "$PKG_DIR"
+
+          curl -fsSL "${{ steps.centos_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.containerd }}" -o "containerd.io.rpm"
+          curl -fsSL "${{ steps.centos_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.docker_ce }}" -o "docker-ce.rpm"
+          curl -fsSL "${{ steps.centos_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.docker_ce_cli }}" -o "docker-ce-cli.rpm"
+          curl -fsSL "${{ steps.centos_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.docker_buildx_plugin }}" -o "docker-buildx-plugin.rpm"
+          curl -fsSL "${{ steps.centos_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.docker_compose_plugin }}" -o "docker-compose-plugin.rpm"
+          curl -fsSL "${{ steps.centos_urls.outputs.BASE }}/${{ steps.centos_urls.outputs.docker_ce_rootless_extras }}" -o "docker-ce-rootless-extras.rpm"
+
+      - name: Upload CentOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: $PKG_DIR
+          path: $PKG_DIR
 
   release:
     needs: [ubuntu-noble, centos-stream-9]
@@ -22,18 +120,34 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: pkgs
+          path: pkgs  # 将 artifact 下载到 pkgs 目录
 
       - name: Verify downloaded files
-        run: ls -lR pkgs
+        run: |
+          ls -lR pkgs  # 列出 pkgs 目录内容
+          if [ ! -d "pkgs/ubuntu-${{ env.UBUNTU_CODENAME }}-amd64" ]; then
+            echo "Error: Ubuntu package directory not found" >&2
+            exit 1
+          fi
+          if [ ! -d "pkgs/centos-stream-${{ env.CENTOS_STREAM_VER }}-x86_64" ]; then
+            echo "Error: CentOS package directory not found" >&2
+            exit 1
+          fi
 
       - name: Create zip archives
         run: |
           set -euo pipefail
-          cd pkgs || exit
-          for dir in */; do
-            zip -r "${dir%/}.zip" "$dir"
-          done
+          cd pkgs || exit  # 确保进入 pkgs 目录
+          
+          # 创建 Ubuntu 压缩包
+          pushd "ubuntu-${{ env.UBUNTU_CODENAME }}-amd64" >/dev/null
+          zip -r "ubuntu-${{ env.UBUNTU_CODENAME }}-amd64.zip" ./*
+          popd >/dev/null
+
+          # 创建 CentOS 压缩包
+          pushd "centos-stream-${{ env.CENTOS_STREAM_VER }}-x86_64" >/dev/null
+          zip -r "centos-stream-${{ env.CENTOS_STREAM_VER }}-x86_64.zip" ./*
+          popd >/dev/null
 
       - name: Generate release tag
         id: tag
@@ -47,8 +161,8 @@ jobs:
           body: |
             📦 自动化构建的 Docker 最新包集合：
             
-            - **Ubuntu {{ env.UBUNTU_CODENAME }}** (Architecture: ${{ steps.ubuntu-noble.outputs.ARCH }})
-            - **CentOS Stream {{ env.CENTOS_STREAM_VER }}** (Architecture: ${{ steps.centos-stream-9.outputs.ARCH }})
+            - **Ubuntu {{ env.UBUNTU_CODENAME }}** (Architecture: amd64)
+            - **CentOS Stream {{ env.CENTOS_STREAM_VER }}** (Architecture: x86_64)
             
             包含组件：
             - containerd.io
