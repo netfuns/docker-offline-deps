@@ -109,12 +109,12 @@ jobs:
           set -euo pipefail
           packages=(${SYSTEM_PACKAGES// / })
           # CentOS 9 官方仓库（BaseOS 和 AppStream）
-          REPOS=("Packages" "AppStream")
+          REPOS=("Packages")
 
           get_latest1() {
             local pkg="$1"
             # 匹配 rpm 包文件名格式
-            local matches=$(echo "$PAGE_CONTENT" | grep -oE "${pkg}" | cut -d'"' -f2)
+            local matches=$(echo "$PAGE_CONTENT" | grep "${pkg}" | cut -d'"' -f12)
             
             if [ -z "$matches" ]; then
               echo "ERROR: No package found for ${pkg}" >&2
@@ -124,17 +124,25 @@ jobs:
             # 按版本号排序并取最新版本
             echo "$matches" | sort -Vr | head -n1
           }
+
+          XML_URL="https://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os/repodata/"
+          
+          # 获取页面内容
+          PAGE_CONTENT=$(curl -fsSL "$XML_URL/" | tr -d '\r')
+          echo "DEBUG: Repository page content:"
+          echo "$PAGE_CONTENT" | head -n 20
+          repo_xml=$(get_latest1 "primary.xml.gz") || exit 1
           
           for repo in "${REPOS[@]}"; do
             echo -e "\n尝试从仓库: $repo 下载"
             REPO_URL="https://mirror.centos.org/centos/9-stream/${repo}/x86_64/os/"
 
             
-             repo_xml=$(get_latest1 "primary.xml.gz") || exit 1
+            
             
             
             # 下载仓库元数据（primary.xml.gz，包含所有包信息）
-            if ! curl -fsSL ${repo_xml} -o primary.xml.gz; then
+            if ! curl -fsSL ${XML_URL}/${repo_xml} -o primary.xml.gz; then
               echo "WARNING: 无法下载 $repo 的元数据"
               continue
             fi
