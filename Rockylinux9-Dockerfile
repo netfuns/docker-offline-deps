@@ -14,12 +14,12 @@ RUN mkdir -p /deps && \
     docker-ce \
     docker-ce-cli \
     docker-buildx-plugin \
-    docker-compose-plugin
+    docker-compose-plugin -y
 
 
 # 安装软件包到指定目录（可选）
 RUN dnf install --downloadonly --destdir=/deps/ \
-    containerd.io docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin
+    containerd.io docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin -y
 
 COPY oraclelinux9-install.sh /deps/install.sh
 RUN chmod +x /deps/install.sh
