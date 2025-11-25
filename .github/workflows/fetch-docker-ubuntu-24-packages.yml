@@ -190,8 +190,8 @@ jobs:
           # 复制脚本到目标目录
           cp ubuntu24-install.sh "$TARGET_DIR/deps/"
           # 给脚本添加执行权限
-          chmod +x "$TARGET_DIR/ubuntu24-install.sh"
-          echo "Successfully added ubuntu24-install.sh to $TARGET_DIR/"
+          chmod +x "$TARGET_DIR/deps/ubuntu24-install.sh"
+          echo "Successfully added ubuntu24-install.sh to $TARGET_DIR/deps/"
           ls -la "$TARGET_DIR/deps/"
           
       - name: Compress deps directory
