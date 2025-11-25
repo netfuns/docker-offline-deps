@@ -179,12 +179,27 @@ jobs:
           else
             echo "is_empty=false" >> $GITHUB_OUTPUT
           fi
-
+          
+      - name: Add ubuntu24-install.sh to deps directory
+        run: |
+          set -euo pipefail
+          # 检查脚本是否存在
+          if [ ! -f "ubuntu24-install.sh" ]; then
+            echo "ERROR: ubuntu24-install.sh not found in repository root!" >&2
+            exit 1
+          fi
+          # 复制脚本到目标目录
+          cp ubuntu24-install.sh "$TARGET_DIR/"
+          # 给脚本添加执行权限
+          chmod +x "$TARGET_DIR/ubuntu24-install.sh"
+          echo "Successfully added ubuntu24-install.sh to $TARGET_DIR/"
+          ls -la "$TARGET_DIR/deps/"
+          
       - name: Compress deps directory
         if: steps.check_empty.outputs.is_empty == 'false'
         run: |
           cd "$TARGET_DIR"
-          tar -czvf deps.tar.gz ./deps
+          tar -czvf deps.tar.gz ./*
           echo "Final deps.tar.gz structure:"
           tar -tf deps.tar.gz
 
