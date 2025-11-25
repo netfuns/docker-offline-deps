@@ -157,8 +157,7 @@ jobs:
             exit 1
           fi
           # 调试：列出下载的文件
-          echo "System packages downloaded:"
-          ls -la "$TARGET_DIR/deps/"
+          echo "System packages downloaded"
 
       # ----------------------------
       # Step 3: Merge & Compress
@@ -189,7 +188,7 @@ jobs:
             exit 1
           fi
           # 复制脚本到目标目录
-          cp ubuntu24-install.sh "$TARGET_DIR/"
+          cp ubuntu24-install.sh "$TARGET_DIR/deps/"
           # 给脚本添加执行权限
           chmod +x "$TARGET_DIR/ubuntu24-install.sh"
           echo "Successfully added ubuntu24-install.sh to $TARGET_DIR/"
@@ -199,7 +198,7 @@ jobs:
         if: steps.check_empty.outputs.is_empty == 'false'
         run: |
           cd "$TARGET_DIR"
-          tar -czvf deps.tar.gz ./*
+          tar -czvf deps.tar.gz deps
           echo "Final deps.tar.gz structure:"
           tar -tf deps.tar.gz
 
