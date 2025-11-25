@@ -1,4 +1,4 @@
-name: Fetch Latest Docker Packages for Ubuntu 24.04
+name: Fetch Docker & Ubuntu System Packages for Noble
 
 on:
   workflow_dispatch:
@@ -18,154 +18,132 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ca-certificates curl jq
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ca-certificates curl jq gzip
 
-      - name: Fetch Docker package URLs
+      # ----------------------------
+      # Step 1: Fetch Docker Components
+      # ----------------------------
+      - name: Fetch latest Docker package URLs
         id: docker_urls
         run: |
           set -euo pipefail
-          DOCKER_BASE_URL="https://download.docker.com/linux/ubuntu/dists/${UBUNTU_CODENAME}/pool/stable/${ARCH}"
+          BASE_URL="https://download.docker.com/linux/ubuntu/dists/${UBUNTU_CODENAME}/pool/stable/${ARCH}"
           
           # 获取页面内容
-          PAGE_CONTENT=$(curl -fsSL "$DOCKER_BASE_URL/" | tr -d '\r')
+          PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
           echo "DEBUG: Docker Repository page content:"
           echo "$PAGE_CONTENT" | head -n 20
 
-          # 精确提取 Docker 包文件名的函数
-          get_docker_latest() {
+          # 精确提取包文件名的函数
+          get_latest() {
             local pkg="$1"
             local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}[^\"]+\">" | cut -d'"' -f2)
             
             if [ -z "$matches" ]; then
               echo "ERROR: No Docker package found for ${pkg}" >&2
-              return 1
+              exit 1
             fi
             
+            # 按版本号排序并取最新版本
             echo "$matches" | sort -Vr | head -n1
           }
 
-          # 获取 Docker 组件
-          CONTAINERD=$(get_docker_latest "containerd.io") || exit 1
-          DOCKER_CE=$(get_docker_latest "docker-ce") || exit 1
-          CLI=$(get_docker_latest "docker-ce-cli") || exit 1
-          BUILDX_PLUGIN=$(get_docker_latest "docker-buildx-plugin") || exit 1
-          COMPOSE_PLUGIN=$(get_docker_latest "docker-compose-plugin") || exit 1
+          # 获取各组件最新包文件名
+          CONTAINERD=$(get_latest "containerd.io") || exit 1
+          DOCKER_CE=$(get_latest "docker-ce") || exit 1
+          CLI=$(get_latest "docker-ce-cli") || exit 1
+          BUILDX_PLUGIN=$(get_latest "docker-buildx-plugin") || exit 1
+          COMPOSE_PLUGIN=$(get_latest "docker-compose-plugin") || exit 1
 
-          # 输出 Docker 包 URL
-          echo "DOCKER_COMPONENTS_URLS=($CONTAINERD $DOCKER_CE $CLI $BUILDX_PLUGIN $COMPOSE_PLUGIN)" >> $GITHUB_OUTPUT
+          # 输出完整下载URL
+          echo "CONTAINERD_URL=${BASE_URL}/${CONTAINERD}" >> $GITHUB_OUTPUT
+          echo "DOCKER_CE_URL=${BASE_URL}/${DOCKER_CE}" >> $GITHUB_OUTPUT
+          echo "CLI_URL=${BASE_URL}/${CLI}" >> $GITHUB_OUTPUT
+          echo "BUILDX_PLUGIN_URL=${BASE_URL}/${BUILDX_PLUGIN}" >> $GITHUB_OUTPUT
+          echo "COMPOSE_PLUGIN_URL=${BASE_URL}/${COMPOSE_PLUGIN}" >> $GITHUB_OUTPUT
 
-      - name: Fetch system tool URLs
+      # ----------------------------
+      # Step 2: Fetch Ubuntu System Packages
+      # ----------------------------
+      - name: Fetch Ubuntu system package URLs
         id: system_urls
         run: |
           set -euo pipefail
-          SYSTEM_BASE_URL="https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/"
-          
-          # 获取页面内容
-          PAGE_CONTENT=$(curl -fsSL "$SYSTEM_BASE_URL/" | tr -d '\r')
-          echo "DEBUG: System Repository page content:"
-          echo "$PAGE_CONTENT" | head -n 20
+          SYSTEM_PACKAGES="uuid-runtime iptables libip4tc2 libip6tc2 libnetfilter-conntrack3 libnfnetlink0 libnftnl11 libxtables12"
+          BASE_URL="https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/Packages.gz"
 
-          # 精确提取系统工具包文件名的函数
-          get_system_latest() {
-            local pkg="$1"
-            local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}[^\"]+_${ARCH}\.deb\"" | cut -d'"' -f2)
-            
-            if [ -z "$matches" ]; then
-              echo "ERROR: No system package found for ${pkg}" >&2
-              return 1
+          # 下载并解压包索引
+          curl -fsSL "$BASE_URL" -o Packages.gz
+          gunzip -c Packages.gz > Packages
+
+          # 提取所有系统包的下载链接
+          while IFS= read -r line; do
+            if [[ "$line" == *"Package: "* ]]; then
+              pkg=$(echo "$line" | awk '{print $2}')
+            elif [[ "$line" == *"Filename: "* ]]; then
+              file=$(echo "$line" | awk '{print $2}')
+              if [[ " $SYSTEM_PACKAGES " =~ " $pkg " ]]; then
+                echo "$pkg: $file"
+              fi
             fi
-            
-            echo "$matches" | sort -Vr | head -n1
-          }
+          done < Packages | sort -u | while IFS=": " read -r pkg file; do
+            echo "SYSTEM_${pkg^^}_URL=https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/$file" >> $GITHUB_OUTPUT
+          done
 
-          # 获取系统工具包
-          UUID_RUNTIME=$(get_system_latest "uuid-runtime") || exit 1
-          IPTABLES=$(get_system_latest "iptables") || exit 1
-          LIBIP4TC=$(get_system_latest "libip4tc2") || exit 1
-          LIBIP6TC=$(get_system_latest "libip6tc2") || exit 1
-          LIBNETFILTER_CONNTRACK=$(get_system_latest "libnetfilter-conntrack3") || exit 1
-          LIBNFNETLINK=$(get_system_latest "libnfnetlink0") || exit 1
-          LIBNFTNL=$(get_system_latest "libnftnl11") || exit 1
-          LIBXTABLES=$(get_system_latest "libxtables12") || exit 1
+          # 清理临时文件
+          rm -f Packages Packages.gz
 
-          # 输出系统工具包 URL
-          echo "SYSTEM_TOOLS_URLS=($UUID_RUNTIME $IPTABLES $LIBIP4TC $LIBIP6TC $LIBNETFILTER_CONNTRACK $LIBNFNETLINK $LIBNFTNL $LIBXTABLES)" >> $GITHUB_OUTPUT
-
+      # ----------------------------
+      # Step 3: Download All Packages
+      # ----------------------------
       - name: Download packages
         run: |
           set -euo pipefail
-          mkdir -p "$TARGET_DIR/deps"
+          mkdir -p "$TARGET_DIR/docker" "$TARGET_DIR/system"
           
           # 下载 Docker 组件
-          IFS=' ' read -ra DOCKER_URLS <<< "${DOCKER_COMPONENTS_URLS[@]}"
-          for url in "${DOCKER_URLS[@]}"; do
-            pkg_name=$(basename "$url")
-            curl -fsSL "$url" -o "$TARGET_DIR/deps/$pkg_name"
-          done
+          curl -fsSL "${{ steps.docker_urls.outputs.CONTAINERD_URL }}" -o "$TARGET_DIR/docker/containerd.deb"
+          curl -fsSL "${{ steps.docker_urls.outputs.DOCKER_CE_URL }}" -o "$TARGET_DIR/docker/docker-ce.deb"
+          curl -fsSL "${{ steps.docker_urls.outputs.CLI_URL }}" -o "$TARGET_DIR/docker/docker-ce-cli.deb"
+          curl -fsSL "${{ steps.docker_urls.outputs.BUILDX_PLUGIN_URL }}" -o "$TARGET_DIR/docker/docker-buildx-plugin.deb"
+          curl -fsSL "${{ steps.docker_urls.outputs.COMPOSE_PLUGIN_URL }}" -o "$TARGET_DIR/docker/docker-compose-plugin.deb"
 
-          # 下载系统工具包
-          IFS=' ' read -ra SYSTEM_URLS <<< "${SYSTEM_TOOLS_URLS[@]}"
-          for url in "${SYSTEM_URLS[@]}"; do
-            pkg_name=$(basename "$url")
-            curl -fsSL "$url" -o "$TARGET_DIR/deps/$pkg_name"
-          done
+          # 下载系统包
+          while IFS=": " read -r pkg file; do
+            curl -fsSL "${!pkg}" -o "$TARGET_DIR/system/$pkg.deb"
+          done < <(env | grep SYSTEM_ | cut -d= -f1)
 
       - name: Verify downloaded files
         run: |
-          ls -lR "$TARGET_DIR/deps"
           echo "Docker components:"
-          dpkg-deb -f "$TARGET_DIR/deps/containerd.io.deb" Package Version
-          dpkg-deb -f "$TARGET_DIR/deps/docker-ce.deb" Package Version
-          dpkg-deb -f "$TARGET_DIR/deps/docker-ce-cli.deb" Package Version
-          dpkg-deb -f "$TARGET_DIR/deps/docker-buildx-plugin.deb" Package Version
-          dpkg-deb -f "$TARGET_DIR/deps/docker-compose-plugin.deb" Package Version
-
-          echo "System tools:"
-          dpkg-deb -f "$TARGET_DIR/deps/uuid-runtime.deb" Package Version
-          dpkg-deb -f "$TARGET_DIR/deps/iptables.deb" Package Version
-          dpkg-deb -f "$TARGET_DIR/deps/libip4tc2.deb" Package Version
-          dpkg-deb -f "$TARGET_DIR/deps/libip6tc2.deb" Package Version
-          dpkg-deb -f "$TARGET_DIR/deps/libnetfilter-conntrack3.deb" Package Version
-          dpkg-deb -f "$TARGET_DIR/deps/libnfnetlink0.deb" Package Version
-          dpkg-deb -f "$TARGET_DIR/deps/libnftnl11.deb" Package Version
-          dpkg-deb -f "$TARGET_DIR/deps/libxtables12.deb" Package Version
+          ls -l "$TARGET_DIR/docker"
+          echo "System packages:"
+          ls -l "$TARGET_DIR/system"
 
       - name: Compress deps directory
         run: |
           cd "$TARGET_DIR"
-          zip -r deps.zip deps/
+          zip -r deps.zip ./*
+          echo "Final deps.zip structure:"
+          unzip -l deps.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-24.04-docker-deps
+          name: ubuntu-24.04-docker-system-deps
           path: "$TARGET_DIR/deps.zip"
-
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: ubuntu-24.04-docker-packages-$(date +%Y%m%d)
-          name: Ubuntu 24.04 Docker Packages $(date +%Y%m%d)
+          tag_name: ubuntu-24.04-deps-$(date +'%Y%m%d')
+          name: Ubuntu 24.04 Docker + System Dependencies
           body: |
-            📦 Ubuntu 24.04 (Noble) Docker 组件包：
+            📦 包含以下组件：
             
-            - containerd.io
-            - docker-ce
-            - docker-ce-cli
-            - docker-buildx-plugin
-            - docker-compose-plugin
+            - Docker CE 全家桶
+            - Ubuntu 24.04 系统工具包
             
-            🔧 系统依赖工具：
-            - uuid-runtime
-            - iptables
-            - libip4tc2
-            - libip6tc2
-            - libnetfilter-conntrack3
-            - libnfnetlink0
-            - libnftnl11
-            - libxtables12
-            
-            包含架构: amd64
+            支持架构: amd64
           files: |
             ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.zip
         env:
