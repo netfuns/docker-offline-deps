@@ -8,8 +8,7 @@ on:
 env:
   UBUNTU_CODENAME: noble   # 固定为 Ubuntu 24.04
   TARGET_DIR: deps         # 统一解压目标目录
-  ARCH: amd64              # 固定为 amd64
-  VERSION_FILE: version_info.txt # 版本信息文件
+  ARCH: amd64              # 固定架构为 amd64
 
 jobs:
   build:
@@ -22,103 +21,66 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends curl jq gzip
 
       # ----------------------------
-      # Step 1: Prepare Directories
+      # Step 1: Download Docker Components
       # ----------------------------
-      - name: Create target directory
-        run: mkdir -p "$TARGET_DIR"
-
-      # ----------------------------
-      # Step 2: Fetch Docker package info (URLs and versions)
-      # ----------------------------
-      - name: Fetch Docker package URLs and versions
-        id: docker_info
+      - name: Fetch Docker package URLs
+        id: docker_urls
         run: |
           set -euo pipefail
           BASE_URL="https://download.docker.com/linux/ubuntu/dists/${UBUNTU_CODENAME}/pool/stable/${ARCH}"
           
-          if ! PAGE_CONTENT=$(curl -fsSL --max-time 30 --retry 3 "$BASE_URL/"); then
-            echo "ERROR: Failed to fetch Docker repository page" >&2
-            exit 1
-          fi
-          PAGE_CONTENT=$(echo "$PAGE_CONTENT" | tr -d '\r')
-          
+          # 获取页面内容
+          PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
+
+          # 精确提取包文件名的函数
           get_latest() {
             local pkg="$1"
-            # 为了在输出变量名中使用，将包名中的点号替换为下划线
-            local safe_pkg_name=$(echo "$pkg" | tr '.' '_')
-            
-            local escaped_pkg=$(echo "$pkg" | sed 's/[.*+?^${}()|[\]\\]/\\&/g')
-            local regex="<a href=\"(${escaped_pkg}_[0-9]+\.[0-9]+\.[0-9]+[^_\"]*_${ARCH}\.deb)\""
-            local matches=$(echo "$PAGE_CONTENT" | grep -oE "$regex" | cut -d'"' -f2)
+            # 使用更精确的正则表达式，确保匹配以 pkg 开头的 .deb 文件
+            local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}([^_\"]+_)?[^\"_]+\.deb\">" | cut -d'"' -f2)
             
             if [ -z "$matches" ]; then
-              echo "ERROR: No matches found for $pkg." >&2
+              echo "ERROR: No package found for ${pkg}" >&2
               exit 1
             fi
             
-            local latest=$(echo "$matches" | sort -Vr | head -n1)
-            local version=$(echo "$latest" | sed -E "s/^${escaped_pkg}_([0-9]+\.[0-9]+\.[0-9]+[^_]+)_.*$/\1/")
-            
-            # 使用安全的变量名输出
-            printf "%s_URL=%s\n" "$safe_pkg_name" "${BASE_URL}/${latest}" >> "$GITHUB_OUTPUT"
-            printf "%s_VERSION=%s\n" "$safe_pkg_name" "$version" >> "$GITHUB_OUTPUT"
+            # 按版本号排序并取最新版本
+            echo "$matches" | sort -Vr | head -n1
           }
 
-          get_latest "containerd.io"
-          get_latest "docker-ce"
-          get_latest "docker-ce-cli"
-          get_latest "docker-buildx-plugin"
-          get_latest "docker-compose-plugin"
+          # 获取各组件最新包文件名
+          CONTAINERD=$(get_latest "containerd.io")
+          DOCKER_CE=$(get_latest "docker-ce")
+          CLI=$(get_latest "docker-ce-cli")
+          BUILDX_PLUGIN=$(get_latest "docker-buildx-plugin")
+          COMPOSE_PLUGIN=$(get_latest "docker-compose-plugin")
 
-      # ----------------------------
-      # Step 3: Download Docker components
-      # ----------------------------
-      - name: Download Docker components
+          # 输出完整下载URL
+          echo "CONTAINERD_URL=${BASE_URL}/${CONTAINERD}" >> $GITHUB_OUTPUT
+          echo "DOCKER_CE_URL=${BASE_URL}/${DOCKER_CE}" >> $GITHUB_OUTPUT
+          echo "CLI_URL=${BASE_URL}/${CLI}" >> $GITHUB_OUTPUT
+          echo "BUILDX_PLUGIN_URL=${BASE_URL}/${BUILDX_PLUGIN}" >> $GITHUB_OUTPUT
+          echo "COMPOSE_PLUGIN_URL=${BASE_URL}/${COMPOSE_PLUGIN}" >> $GITHUB_OUTPUT
+
+      - name: Download Docker packages
         run: |
           set -euo pipefail
+          # 创建 docker 子目录
+          mkdir -p "$TARGET_DIR/docker"
           
-          echo "# 版本信息" > "$VERSION_FILE"
-          echo "## Docker 组件" >> "$VERSION_FILE"
-          echo "" >> "$VERSION_FILE"
-
-          components=("containerd.io" "docker-ce" "docker-ce-cli" "docker-buildx-plugin" "docker-compose-plugin")
-          for comp in "${components[@]}"; do
-            # 修复：在循环中去掉 local 关键字
-            safe_comp_name=$(echo "$comp" | tr '.' '_')
-            url_var="${safe_comp_name}_URL"
-            ver_var="${safe_comp_name}_VERSION"
-            
-            # 使用间接变量引用
-            url="${!url_var}"
-            ver="${!ver_var}"
-            
-            if [ -z "$url" ] || [ -z "$ver" ]; then
-              echo "ERROR: Missing URL or version for $comp (tried variables: $url_var, $ver_var)" >&2
-              exit 1
-            fi
-            
-            echo "Downloading $comp ($ver)..."
-            if ! curl -fsSL --max-time 60 --retry 3 "$url" -o "$TARGET_DIR/$comp.deb"; then
-              echo "ERROR: Failed to download $comp" >&2
-              exit 1
-            fi
-            echo "$comp: $ver" >> "$VERSION_FILE"
-          done
-        # 将上一步的输出作为环境变量注入，变量名已经是安全的
-        env:
-          containerd_io_URL: ${{ steps.docker_info.outputs.containerd_io_URL }}
-          containerd_io_VERSION: ${{ steps.docker_info.outputs.containerd_io_VERSION }}
-          docker-ce_URL: ${{ steps.docker_info.outputs.docker-ce_URL }}
-          docker-ce_VERSION: ${{ steps.docker_info.outputs.docker-ce_VERSION }}
-          docker-ce-cli_URL: ${{ steps.docker_info.outputs.docker-ce-cli_URL }}
-          docker-ce-cli_VERSION: ${{ steps.docker_info.outputs.docker-ce-cli_VERSION }}
-          docker-buildx-plugin_URL: ${{ steps.docker_info.outputs.docker-buildx-plugin_URL }}
-          docker-buildx-plugin_VERSION: ${{ steps.docker_info.outputs.docker-buildx-plugin_VERSION }}
-          docker-compose-plugin_URL: ${{ steps.docker_info.outputs.docker-compose-plugin_URL }}
-          docker-compose-plugin_VERSION: ${{ steps.docker_info.outputs.docker-compose-plugin_VERSION }}
+          # 从上个步骤的输出中获取 URL 并下载
+          echo "Downloading Docker packages..."
+          curl -fsSL "${{ steps.docker_urls.outputs.CONTAINERD_URL }}" -o "$TARGET_DIR/docker/containerd.io.deb"
+          curl -fsSL "${{ steps.docker_urls.outputs.DOCKER_CE_URL }}" -o "$TARGET_DIR/docker/docker-ce.deb"
+          curl -fsSL "${{ steps.docker_urls.outputs.CLI_URL }}" -o "$TARGET_DIR/docker/docker-ce-cli.deb"
+          curl -fsSL "${{ steps.docker_urls.outputs.BUILDX_PLUGIN_URL }}" -o "$TARGET_DIR/docker/docker-buildx-plugin.deb"
+          curl -fsSL "${{ steps.docker_urls.outputs.COMPOSE_PLUGIN_URL }}" -o "$TARGET_DIR/docker/docker-compose-plugin.deb"
+          
+          # 调试：列出下载的文件
+          echo "Docker packages downloaded:"
+          ls -la "$TARGET_DIR/docker/"
 
       # ----------------------------
-      # Step 4: Download Ubuntu System Packages
+      # Step 2: Download Ubuntu System Packages
       # ----------------------------
       - name: Define system packages
         run: |
@@ -127,50 +89,43 @@ jobs:
       - name: Download system packages
         run: |
           set -euo pipefail
+          mkdir -p "$TARGET_DIR/system"
           packages=(${SYSTEM_PACKAGES// / })
           
-          echo "" >> "$VERSION_FILE"
-          echo "## Ubuntu 系统包" >> "$VERSION_FILE"
-          echo "" >> "$VERSION_FILE"
-          
+          # 遍历所有可能的仓库子目录
           REPOS=("main" "updates" "security")
           for repo in "${REPOS[@]}"; do
             echo "Trying repository: $repo"
             PACKAGES_GZ_URL="https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/${repo}/binary-${ARCH}/Packages.gz"
-            
-            if ! curl -fsSL --max-time 30 --retry 3 "$PACKAGES_GZ_URL" -o Packages.gz; then
+            if ! curl -fsSL "$PACKAGES_GZ_URL" -o Packages.gz; then
               echo "WARNING: Failed to download Packages.gz from $repo"
               continue
             fi
+            
             if ! gunzip -c Packages.gz > Packages; then
               echo "WARNING: Failed to extract Packages from $repo"
               rm -f Packages.gz
               continue
             fi
             
-            current_pkg=""
-            current_version=""
-            current_filename=""
+            # 解析Packages文件并下载对应包
             while IFS= read -r line; do
               if [[ "$line" == "Package: "* ]]; then
                 current_pkg=$(echo "$line" | awk '{print $2}')
-              elif [[ "$line" == "Version: "* ]]; then
-                current_version=$(echo "$line" | awk '{print $2}')
-              elif [[ "$line" == "Filename: "* ]]; then
-                current_filename=$(echo "$line" | awk '{print $2}')
-              elif [[ -z "$line" && -n "$current_pkg" && " ${packages[*]} " =~ " ${current_pkg} " ]]; then
-                FILE_URL="https://archive.ubuntu.com/ubuntu/${current_filename}"
-                echo "Downloading $current_pkg ($current_version) from $repo..."
-                if curl -fsSL --max-time 60 --retry 3 "$FILE_URL" -o "$TARGET_DIR/$current_pkg.deb"; then
-                  echo "$current_pkg: $current_version" >> "$VERSION_FILE"
-                  packages=(${packages[@]/$current_pkg})
-                  echo "Successfully downloaded $current_pkg"
-                else
-                  echo "WARNING: Failed to download $current_pkg from $repo"
+              elif [[ "$line" == "Filename: "* && -n "$current_pkg" ]]; then
+                # 检查当前包是否在需要下载的列表中
+                if [[ " ${packages[*]} " =~ " ${current_pkg} " ]]; then
+                  file=$(echo "$line" | awk '{print $2}')
+                  FILE_URL="https://archive.ubuntu.com/ubuntu/${file}"
+                  echo "Downloading $current_pkg from $repo..."
+                  if curl -fsSL "$FILE_URL" -o "$TARGET_DIR/system/$current_pkg.deb"; then
+                    # 移除已成功下载的包
+                    packages=(${packages[@]/$current_pkg})
+                    echo "Successfully downloaded $current_pkg"
+                  else
+                    echo "WARNING: Failed to download $current_pkg from $repo"
+                  fi
                 fi
-                current_pkg=""
-                current_version=""
-                current_filename=""
               fi
             done < Packages
             
@@ -182,78 +137,89 @@ jobs:
             fi
           done
 
+          # 检查是否有未找到的包
           if [ ${#packages[@]} -ne 0 ]; then
-            echo "ERROR: Missing packages: ${packages[@]}" >&2
+            echo "ERROR: Missing system packages: ${packages[@]}" >&2
             exit 1
           fi
 
+          # 调试：列出下载的文件
+          echo "System packages downloaded:"
+          ls -la "$TARGET_DIR/system/"
+
       # ----------------------------
-      # Step 5: Verify and Compress
+      # Step 3: Merge & Compress
       # ----------------------------
-      - name: List files in target directory
+      - name: Merge all packages into root deps directory
         run: |
-          echo "Contents of $TARGET_DIR:"
-          ls -la "$TARGET_DIR"
+          # 将 docker 和 system 目录下的所有 .deb 文件移动到 deps 根目录
+          mv "$TARGET_DIR/docker"/*.deb "$TARGET_DIR/"
+          mv "$TARGET_DIR/system"/*.deb "$TARGET_DIR/"
+          # 删除空的子目录
+          rmdir "$TARGET_DIR/docker" "$TARGET_DIR/system"
+          
+          # 调试：列出将要被压缩的所有文件
+          echo "Final package list to compress:"
+          ls -la "$TARGET_DIR/"
+
+      - name: Check if deps directory is empty
+        id: check_empty
+        run: |
+          if [ -z "$(ls -A $TARGET_DIR)" ]; then
+            echo "ERROR: No files found in $TARGET_DIR. Aborting compression." >&2
+            echo "is_empty=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_empty=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Compress deps directory
+        if: steps.check_empty.outputs.is_empty == 'false'
         run: |
           cd "$TARGET_DIR"
-          tar -czvf deps.tar.gz ./*
-          echo "Final deps.tar.gz size: $(du -sh deps.tar.gz | awk '{print $1}')"
+          tar -czvf deps.tar.gz ./*.deb
+          echo "Final deps.tar.gz structure:"
+          tar -tf deps.tar.gz
 
       - name: Upload artifact
+        if: steps.check_empty.outputs.is_empty == 'false'
         uses: actions/upload-artifact@v4
         with:
           name: ubuntu-24.04-docker-system-deps
           path: "$TARGET_DIR/deps.tar.gz"
-          retention-days: 7
 
       # ----------------------------
-      # Step 6: Create GitHub Release
+      # Step 4-6: Create Release (only if files exist)
       # ----------------------------
       - name: Generate release tag
+        if: steps.check_empty.outputs.is_empty == 'false'
         id: generate_tag
         run: |
           RELEASE_TAG="ubuntu-24.04-deps-$(date +'%Y%m%d')"
           echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
 
-      - name: Read version info
-        id: read_version_info
-        run: |
-          VERSION_INFO=$(cat "$VERSION_FILE")
-          VERSION_INFO_ESCAPED=$(echo "$VERSION_INFO" | jq -s -R .)
-          echo "VERSION_INFO=$VERSION_INFO_ESCAPED" >> $GITHUB_ENV
-
       - name: Create GitHub Release
+        if: steps.check_empty.outputs.is_empty == 'false'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: Ubuntu 24.04 Docker + System Dependencies (${{ env.RELEASE_TAG }})
           body: |
-            📦 自动构建的依赖包（Ubuntu 24.04 amd64）
+            📦 包含以下组件：
             
-            ## 包含组件版本
+            - Docker CE 全家桶
+            - Ubuntu 24.04 系统工具包
             
-            ${{ fromJSON(env.VERSION_INFO) }}
+            支持架构: amd64
             
-            ---
-            
-            **构建信息**  
-            - 架构: amd64  
-            - 工作流: ${{ github.workflow }}  
-            - 构建时间: ${{ github.event.head_commit.timestamp }}
-            
-            > 注：此 Release 由 GitHub Actions 自动生成。
+            此 Release 由 GitHub Actions 自动生成。
           files: |
             ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
-        if: github.ref == 'refs/heads/main'
 
       # ----------------------------
       # Step 7: Cleanup
       # ----------------------------
       - name: Cleanup
-        if: always()
         run: |
-          rm -rf "$TARGET_DIR" "$VERSION_FILE"
+          rm -rf "$TARGET_DIR"
