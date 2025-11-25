@@ -1,0 +1,33 @@
+# 基础镜像
+FROM oraclelinux:9
+
+# 安装必要工具
+RUN dnf install -y wget tar gzip dnf-plugins-core createrepo_c
+
+# 配置Docker仓库（使用CentOS镜像源兼容Oracle Linux 9）
+RUN dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+
+# 下载所有需要的RPM包到临时目录
+RUN mkdir -p /tmp/deps && \
+    dnf download --resolve \
+    containerd.io \
+    docker-ce \
+    docker-ce-cli \
+    docker-buildx-plugin \
+    docker-compose-plugin
+
+# 移动文件并生成仓库元数据
+RUN mkdir -p /deps && \
+    mv /tmp/deps/*.rpm /deps/ && \
+    createrepo_c /deps
+
+# 安装软件包到指定目录（可选）
+RUN mkdir -p /deps && \
+    dnf install --downloadonly --destdir=/deps/ \
+    containerd.io docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin
+
+# 合并所有文件到最终压缩包
+RUN tar -czvf /deps.tar.gz -C /deps .
+
+# 设置输出目录
+VOLUME /deps.tar.gz
