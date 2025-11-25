@@ -32,15 +32,15 @@ jobs:
           # CentOS Docker 官方仓库地址
           BASE_URL="https://download.docker.com/linux/centos/${CENTOS_VERSION}/${ARCH}/stable/Packages"
           
-          # 获取仓库页面内容
+          # 获取页面内容
           PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
-          echo "rpmUG: Repository page content:"
+          echo "DEBUG: Repository page content:"
           echo "$PAGE_CONTENT" | head -n 20
 
-          # 提取指定包的最新版本（rpm 格式）
+          # 精确提取包文件名的函数
           get_latest() {
             local pkg="$1"
-            # 匹配 rpm 包文件名格式
+            # 提取所有匹配的文件名
             local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}[^\"]+\">" | cut -d'"' -f2)
             
             if [ -z "$matches" ]; then
@@ -52,14 +52,14 @@ jobs:
             echo "$matches" | sort -Vr | head -n1
           }
 
-          # 获取各 Docker 组件最新包
+          # 获取各组件最新包文件名
           CONTAINERD=$(get_latest "containerd.io") || exit 1
           DOCKER_CE=$(get_latest "docker-ce") || exit 1
           CLI=$(get_latest "docker-ce-cli") || exit 1
           BUILDX_PLUGIN=$(get_latest "docker-buildx-plugin") || exit 1
           COMPOSE_PLUGIN=$(get_latest "docker-compose-plugin") || exit 1
 
-          # 输出完整下载链接
+          # 输出完整下载URL
           echo "CONTAINERD_URL=${BASE_URL}/${CONTAINERD}" >> $GITHUB_OUTPUT
           echo "DOCKER_CE_URL=${BASE_URL}/${DOCKER_CE}" >> $GITHUB_OUTPUT
           echo "CLI_URL=${BASE_URL}/${CLI}" >> $GITHUB_OUTPUT
@@ -67,7 +67,7 @@ jobs:
           echo "COMPOSE_PLUGIN_URL=${BASE_URL}/${COMPOSE_PLUGIN}" >> $GITHUB_OUTPUT
 
           # 调试输出
-          echo "rpmUG: 找到的 Docker 包:"
+          echo "DEBUG: Found packages:"
           echo "Containerd: $CONTAINERD"
           echo "Docker CE: $DOCKER_CE"
           echo "CLI: $CLI"
