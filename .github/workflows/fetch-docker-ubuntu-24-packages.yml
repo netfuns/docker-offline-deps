@@ -9,7 +9,6 @@ env:
   UBUNTU_CODENAME: noble   # 固定为 Ubuntu 24.04
   TARGET_DIR: deps         # 统一解压目标目录
   ARCH: amd64              # 固定架构为 amd64
-  VERSION_FILE: version_info.txt # 版本信息文件
 
 jobs:
   build:
@@ -32,8 +31,10 @@ jobs:
           
           # 获取页面内容
           PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
-          
-          # 精确提取包文件名和版本的函数
+          echo "DEBUG: Docker Repository page content:"
+          echo "$PAGE_CONTENT" | head -n 20
+
+          # 精确提取包文件名的函数
           get_latest() {
             local pkg="$1"
             local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}[^\"]+\">" | cut -d'"' -f2)
@@ -44,20 +45,10 @@ jobs:
             fi
             
             # 按版本号排序并取最新版本
-            local latest=$(echo "$matches" | sort -Vr | head -n1)
-            echo "$latest"
-            
-            # 提取版本号（去除文件名前缀和后缀）
-            local version=$(echo "$latest" | sed -E "s/^${pkg}_([0-9]+\.[0-9]+\.[0-9]+[^_]+)_.*$/\1/")
-            echo "$pkg: $version" >> "$VERSION_FILE"
+            echo "$matches" | sort -Vr | head -n1
           }
 
-          # 初始化版本文件
-          echo "# 版本信息" > "$VERSION_FILE"
-          echo "## Docker 组件" >> "$VERSION_FILE"
-          echo "" >> "$VERSION_FILE"
-
-          # 获取各组件最新包文件名和版本
+          # 获取各组件最新包文件名
           CONTAINERD=$(get_latest "containerd.io") || exit 1
           DOCKER_CE=$(get_latest "docker-ce") || exit 1
           CLI=$(get_latest "docker-ce-cli") || exit 1
@@ -84,11 +75,6 @@ jobs:
           mkdir -p "$TARGET_DIR/system"
           packages=(${SYSTEM_PACKAGES// / })
           
-          # 添加系统包标题到版本文件
-          echo "" >> "$VERSION_FILE"
-          echo "## Ubuntu 系统包" >> "$VERSION_FILE"
-          echo "" >> "$VERSION_FILE"
-          
           # 遍历所有可能的仓库子目录
           REPOS=("main" "updates" "security")
           for repo in "${REPOS[@]}"; do
@@ -109,31 +95,24 @@ jobs:
             
             # 解析Packages文件并下载对应包
             current_pkg=""
-            current_version=""
             while IFS= read -r line; do
               if [[ "$line" == "Package: "* ]]; then
                 current_pkg=$(echo "$line" | awk '{print $2}')
-              elif [[ "$line" == "Version: "* ]]; then
-                current_version=$(echo "$line" | awk '{print $2}')
-              elif [[ "$line" == "Filename: "* && -n "$current_pkg" && -n "$current_version" ]]; then
+              elif [[ "$line" == "Filename: "* && -n "$current_pkg" ]]; then
                 file=$(echo "$line" | awk '{print $2}')
                 # 检查当前包是否在需要下载的列表中
                 if [[ " ${packages[*]} " =~ " ${current_pkg} " ]]; then
-                  # 构建完整下载URL
+                  # 构建完整下载URL (Filename已经包含了pool/...路径)
                   FILE_URL="https://archive.ubuntu.com/ubuntu/${file}"
-                  echo "Downloading $current_pkg ($current_version) from $repo repository..."
+                  echo "Downloading $current_pkg from $repo repository..."
+                  echo "URL: $FILE_URL"
                   if curl -fsSL "$FILE_URL" -o "$TARGET_DIR/system/$current_pkg.deb"; then
-                    # 记录版本信息
-                    echo "$current_pkg: $current_version" >> "$VERSION_FILE"
                     # 移除已成功下载的包
                     packages=(${packages[@]/$current_pkg})
                     echo "Successfully downloaded $current_pkg"
                   else
                     echo "WARNING: Failed to download $current_pkg from $repo"
                   fi
-                  # 重置当前包和版本
-                  current_pkg=""
-                  current_version=""
                 fi
               fi
             done < Packages
@@ -176,23 +155,16 @@ jobs:
           path: "$TARGET_DIR/deps.tar.gz"
 
       # ----------------------------
-      # Step 4: Prepare Release
+      # Step 4: Prepare Release Tag
       # ----------------------------
       - name: Generate release tag
         id: generate_tag
         run: |
+          # 生成格式为 YYYYMMDD 的日期字符串
           RELEASE_TAG="ubuntu-24.04-deps-$(date +'%Y%m%d')"
-          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
           echo "Generated release tag: $RELEASE_TAG"
-
-      - name: Read version info
-        id: read_version_info
-        run: |
-          # 读取版本信息文件内容
-          VERSION_INFO=$(cat "$VERSION_FILE")
-          # 对内容进行转义，以便在JSON中使用
-          VERSION_INFO_ESCAPED=$(echo "$VERSION_INFO" | jq -s -R .)
-          echo "VERSION_INFO=$VERSION_INFO_ESCAPED" >> $GITHUB_ENV
+          # 将标签存入环境变量，供后续步骤使用
+          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
 
       # ----------------------------
       # Step 5: Create GitHub Release
@@ -200,18 +172,18 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
+          # 引用上一步生成的环境变量作为标签名
           tag_name: ${{ env.RELEASE_TAG }}
           name: Ubuntu 24.04 Docker + System Dependencies (${{ env.RELEASE_TAG }})
           body: |
             📦 包含以下组件：
             
-            ${{ fromJSON(env.VERSION_INFO) }}
+            - Docker CE 全家桶
+            - Ubuntu 24.04 系统工具包
             
-            ---
+            支持架构: amd64
             
-            **支持架构**: amd64  
-            **自动生成时间**: ${{ github.sha }}  
-            **工作流**: ${{ github.workflow }}
+            此 Release 由 GitHub Actions 自动生成。
           files: |
             ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.tar.gz
         env:
@@ -222,4 +194,4 @@ jobs:
       # ----------------------------
       - name: Cleanup
         run: |
-          rm -rf "$TARGET_DIR" "$VERSION_FILE"
+          rm -rf "$TARGET_DIR"
