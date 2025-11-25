@@ -7,7 +7,7 @@ on:
 
 env:
   UBUNTU_CODENAME: noble   # 固定为 Ubuntu 24.04
-  TARGET_DIR: deps         # 解压目标目录
+  TARGET_DIR: deps         # 统一解压目标目录
   ARCH: amd64              # 固定架构为 amd64
 
 jobs:
@@ -18,108 +18,70 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ca-certificates curl jq gzip
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ca-certificates curl jq apt-utils
 
       # ----------------------------
       # Step 1: Fetch Docker Components
       # ----------------------------
-      - name: Fetch latest Docker package URLs
-        id: docker_urls
+      - name: Add Docker GPG key
+        run: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+      - name: Add Docker repository
         run: |
-          set -euo pipefail
-          BASE_URL="https://download.docker.com/linux/ubuntu/dists/${UBUNTU_CODENAME}/pool/stable/${ARCH}"
-          
-          # 获取页面内容
-          PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
-          echo "DEBUG: Docker Repository page content:"
-          echo "$PAGE_CONTENT" | head -n 20
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+            $(lsb_release -cs) stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-          # 精确提取包文件名的函数
-          get_latest() {
-            local pkg="$1"
-            local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}[^\"]+\">" | cut -d'"' -f2)
-            
-            if [ -z "$matches" ]; then
-              echo "ERROR: No Docker package found for ${pkg}" >&2
-              exit 1
-            fi
-            
-            # 按版本号排序并取最新版本
-            echo "$matches" | sort -Vr | head -n1
-          }
+      - name: Install Docker components
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io
 
-          # 获取各组件最新包文件名
-          CONTAINERD=$(get_latest "containerd.io") || exit 1
-          DOCKER_CE=$(get_latest "docker-ce") || exit 1
-          CLI=$(get_latest "docker-ce-cli") || exit 1
-          BUILDX_PLUGIN=$(get_latest "docker-buildx-plugin") || exit 1
-          COMPOSE_PLUGIN=$(get_latest "docker-compose-plugin") || exit 1
-
-          # 输出完整下载URL
-          echo "CONTAINERD_URL=${BASE_URL}/${CONTAINERD}" >> $GITHUB_OUTPUT
-          echo "DOCKER_CE_URL=${BASE_URL}/${DOCKER_CE}" >> $GITHUB_OUTPUT
-          echo "CLI_URL=${BASE_URL}/${CLI}" >> $GITHUB_OUTPUT
-          echo "BUILDX_PLUGIN_URL=${BASE_URL}/${BUILDX_PLUGIN}" >> $GITHUB_OUTPUT
-          echo "COMPOSE_PLUGIN_URL=${BASE_URL}/${COMPOSE_PLUGIN}" >> $GITHUB_OUTPUT
+      - name: Download Docker binaries
+        run: |
+          mkdir -p "$TARGET_DIR/docker"
+          docker_version=$(docker --version | awk '{print $3}' | cut -d',' -f1)
+          for component in docker-ce-cli containerd.io docker-ce; do
+            dpkg -L $component | grep "/$component$" | xargs -I{} cp {} "$TARGET_DIR/docker/"
+          done
 
       # ----------------------------
       # Step 2: Fetch Ubuntu System Packages
       # ----------------------------
-      - name: Fetch Ubuntu system package URLs
-        id: system_urls
+      - name: Define system packages
+        run: |
+          echo "SYSTEM_PACKAGES=uuid-runtime iptables libip4tc2 libip6tc2 libnetfilter-conntrack3 libnfnetlink0 libnftnl11 libxtables12" >> $GITHUB_ENV
+
+      - name: Download system packages
         run: |
           set -euo pipefail
-          SYSTEM_PACKAGES="uuid-runtime iptables libip4tc2 libip6tc2 libnetfilter-conntrack3 libnfnetlink0 libnftnl11 libxtables12"
-          BASE_URL="https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/Packages.gz"
+          mkdir -p "$TARGET_DIR/system"
+          packages=(${SYSTEM_PACKAGES// / })
+          
+          # 创建临时APT缓存目录
+          tmp_cache=$(mktemp -d)
+          echo "APT::Cache-Limit 100000000;" | sudo tee /etc/apt/apt.conf.d/99cache-limit >/dev/null
+          
+          # 配置APT源
+          cat <<EOF | sudo tee /etc/apt/sources.list
+          deb http://archive.ubuntu.com/ubuntu/ ${UBUNTU_CODENAME} main restricted universe multiverse
+          deb-src http://archive.ubuntu.com/ubuntu/ ${UBUNTU_CODENAME} main restricted universe multiverse
+          EOF
 
-          # 下载并解压包索引
-          curl -fsSL "$BASE_URL" -o Packages.gz
-          gunzip -c Packages.gz > Packages
+          # 更新包列表并安装到临时目录
+          sudo apt-get update
+          sudo apt-get download -d ${packages[@]} --reinstall --allow-downgrades --allow-change-held-packages --target-release=${UBUNTU_CODENAME}
 
-          # 提取所有系统包的下载链接
-          while IFS= read -r line; do
-            if [[ "$line" == *"Package: "* ]]; then
-              pkg=$(echo "$line" | awk '{print $2}')
-            elif [[ "$line" == *"Filename: "* ]]; then
-              file=$(echo "$line" | awk '{print $2}')
-              if [[ " $SYSTEM_PACKAGES " =~ " $pkg " ]]; then
-                echo "$pkg: $file"
-              fi
-            fi
-          done < Packages | sort -u | while IFS=": " read -r pkg file; do
-            echo "SYSTEM_${pkg^^}_URL=https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/$file" >> $GITHUB_OUTPUT
-          done
+          # 移动下载的deb文件到目标目录
+          find /var/cache/apt/archives/ -name '*.deb' -exec mv {} "$TARGET_DIR/system/" \;
 
           # 清理临时文件
-          rm -f Packages Packages.gz
+          rm -rf "$tmp_cache"
+          sudo rm -rf /var/cache/apt/archives/*.deb
 
       # ----------------------------
-      # Step 3: Download All Packages
-      # ----------------------------
-      - name: Download packages
-        run: |
-          set -euo pipefail
-          mkdir -p "$TARGET_DIR/docker" "$TARGET_DIR/system"
-          
-          # 下载 Docker 组件
-          curl -fsSL "${{ steps.docker_urls.outputs.CONTAINERD_URL }}" -o "$TARGET_DIR/docker/containerd.deb"
-          curl -fsSL "${{ steps.docker_urls.outputs.DOCKER_CE_URL }}" -o "$TARGET_DIR/docker/docker-ce.deb"
-          curl -fsSL "${{ steps.docker_urls.outputs.CLI_URL }}" -o "$TARGET_DIR/docker/docker-ce-cli.deb"
-          curl -fsSL "${{ steps.docker_urls.outputs.BUILDX_PLUGIN_URL }}" -o "$TARGET_DIR/docker/docker-buildx-plugin.deb"
-          curl -fsSL "${{ steps.docker_urls.outputs.COMPOSE_PLUGIN_URL }}" -o "$TARGET_DIR/docker/docker-compose-plugin.deb"
-
-          # 下载系统包
-          while IFS=": " read -r pkg file; do
-            curl -fsSL "${!pkg}" -o "$TARGET_DIR/system/$pkg.deb"
-          done < <(env | grep SYSTEM_ | cut -d= -f1)
-
-      - name: Verify downloaded files
-        run: |
-          echo "Docker components:"
-          ls -l "$TARGET_DIR/docker"
-          echo "System packages:"
-          ls -l "$TARGET_DIR/system"
-
+      # Step 3: Compression & Verification
       - name: Compress deps directory
         run: |
           cd "$TARGET_DIR"
@@ -148,3 +110,10 @@ jobs:
             ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+
+      # ----------------------------
+      # Step 4: Cleanup
+      - name: Cleanup
+        run: |
+          rm -rf "$TARGET_DIR/docker"
+          rm -rf "$TARGET_DIR/system"
