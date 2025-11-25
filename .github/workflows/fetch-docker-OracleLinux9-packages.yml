@@ -40,24 +40,25 @@ jobs:
         if: steps.check_empty.outputs.is_empty == 'false'
         id: generate_tag
         run: |
-          RELEASE_TAG="oraclelinux9-deps-$(date +'%Y%m%d')"
+          RELEASE_TAG="oraclelinux9-24.04-deps-$(date +'%Y%m%d')"
           echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
 
       - name: Create GitHub Release
+        if: steps.check_empty.outputs.is_empty == 'false'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: Oracle Linux 9 System Dependencies (${{ env.RELEASE_TAG }})
+          name: OracleLinux 9 Docker + System Dependencies (${{ env.RELEASE_TAG }})
           body: |
             📦 包含以下组件：
             
             - Docker CE 全家桶
-            - Oracle Linux 9 系统工具包
+            - OracleLinux 9 系统工具包
             
             支持架构: amd64
             
             此 Release 由 GitHub Actions 自动生成。
           files: |
-            ${{ github.workspace }}/deps.tar.gz
+            ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
