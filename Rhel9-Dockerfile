@@ -2,7 +2,7 @@
 FROM redhat/ubi9:latest
 
 # 安装必要工具
-RUN dnf install -y wget tar gzip dnf-plugins-core createrepo_c
+RUN dnf install -y wget tar gzip dnf-plugins-core
 
 # 配置Docker仓库（使用CentOS镜像源兼容Oracle Linux 9）
 RUN dnf config-manager --add-repo=https://download.docker.com/linux/rhel/docker-ce.repo
