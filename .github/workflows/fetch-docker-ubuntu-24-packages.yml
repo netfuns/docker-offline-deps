@@ -23,7 +23,7 @@ jobs:
       # ----------------------------
       # Step 1: Download Docker Components
       # ----------------------------
-            - name: Fetch Docker package URLs
+      - name: Fetch Docker package URLs
         id: docker_urls
         run: |
           set -euo pipefail
