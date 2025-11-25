@@ -28,4 +28,4 @@ RUN chmod +x /deps/oraclelinux9-install.sh
 RUN tar -czvf /tmp.tar.gz -C /deps .
 
 # 设置输出目录
-VOLUME /tmp.tar.gz
+#VOLUME /tmp.tar.gz
