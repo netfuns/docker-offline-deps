@@ -83,10 +83,10 @@ jobs:
 
           components=("containerd.io" "docker-ce" "docker-ce-cli" "docker-buildx-plugin" "docker-compose-plugin")
           for comp in "${components[@]}"; do
-            # 在引用环境变量时，同样将点号替换为下划线
-            local safe_comp_name=$(echo "$comp" | tr '.' '_')
-            local url_var="${safe_comp_name}_URL"
-            local ver_var="${safe_comp_name}_VERSION"
+            # 修复：在循环中去掉 local 关键字
+            safe_comp_name=$(echo "$comp" | tr '.' '_')
+            url_var="${safe_comp_name}_URL"
+            ver_var="${safe_comp_name}_VERSION"
             
             # 使用间接变量引用
             url="${!url_var}"
