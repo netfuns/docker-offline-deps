@@ -34,7 +34,7 @@ jobs:
           
           # 获取仓库页面内容
           PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
-          echo "DEBUG: Repository page content:"
+          echo "rpmUG: Repository page content:"
           echo "$PAGE_CONTENT" | head -n 20
 
           # 提取指定包的最新版本（rpm 格式）
@@ -67,7 +67,7 @@ jobs:
           echo "COMPOSE_PLUGIN_URL=${BASE_URL}/${COMPOSE_PLUGIN}" >> $GITHUB_OUTPUT
 
           # 调试输出
-          echo "DEBUG: 找到的 Docker 包:"
+          echo "rpmUG: 找到的 Docker 包:"
           echo "Containerd: $CONTAINERD"
           echo "Docker CE: $DOCKER_CE"
           echo "CLI: $CLI"
@@ -80,11 +80,11 @@ jobs:
           mkdir -p "$TARGET_DIR/deps"
           
           # 下载所有 Docker 组件（保存为 rpm 包）
-          curl -fsSL "${{ steps.package_urls.outputs.CONTAINERD_URL }}" -o "$TARGET_DIR/deps/"
-          curl -fsSL "${{ steps.package_urls.outputs.DOCKER_CE_URL }}" -o "$TARGET_DIR/deps/"
-          curl -fsSL "${{ steps.package_urls.outputs.CLI_URL }}" -o "$TARGET_DIR/deps/"
-          curl -fsSL "${{ steps.package_urls.outputs.BUILDX_PLUGIN_URL }}" -o "$TARGET_DIR/deps/"
-          curl -fsSL "${{ steps.package_urls.outputs.COMPOSE_PLUGIN_URL }}" -o "$TARGET_DIR/deps/"
+          curl -fsSL "${{ steps.package_urls.outputs.CONTAINERD_URL }}" -o "$TARGET_DIR/deps/containerd.rpm"
+          curl -fsSL "${{ steps.package_urls.outputs.DOCKER_CE_URL }}" -o "$TARGET_DIR/deps/docker-ce.rpm"
+          curl -fsSL "${{ steps.package_urls.outputs.CLI_URL }}" -o "$TARGET_DIR/deps/docker-ce-cli.rpm"
+          curl -fsSL "${{ steps.package_urls.outputs.BUILDX_PLUGIN_URL }}" -o "$TARGET_DIR/deps/docker-buildx-plugin.rpm"
+          curl -fsSL "${{ steps.package_urls.outputs.COMPOSE_PLUGIN_URL }}" -o "$TARGET_DIR/deps/docker-compose-plugin.rpm"
 
       - name: 验证 Docker 包
         run: |
