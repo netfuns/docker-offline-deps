@@ -104,7 +104,7 @@ jobs:
       - name: Download system packages
         run: |
           set -euo pipefail
-          mkdir -p "$TARGET_DIR/deps"
+          mkdir -p "$TARGET_DIR/system"
           packages=(${SYSTEM_PACKAGES// / })
           
           # 遍历所有可能的仓库子目录
@@ -151,16 +151,15 @@ jobs:
               break
             fi
           done
-
           # 检查是否有未找到的包
           if [ ${#packages[@]} -ne 0 ]; then
             echo "ERROR: Missing system packages: ${packages[@]}" >&2
             exit 1
           fi
-
           # 调试：列出下载的文件
           echo "System packages downloaded:"
-          ls -la "$TARGET_DIR/deps/"
+          ls -la "$TARGET_DIR/system/"
+          mv "$TARGET_DIR/system/*" "$TARGET_DIR/deps/"
 
       # ----------------------------
       # Step 3: Merge & Compress
