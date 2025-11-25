@@ -28,7 +28,7 @@ jobs:
         run: mkdir -p "$TARGET_DIR"
 
       # ----------------------------
-      # Step 2: Download Docker Components
+      # Step 2: Download Docker Components（核心修复：转义包名中的.）
       # ----------------------------
       - name: Fetch Docker package URLs and versions
         id: docker_info
@@ -39,13 +39,16 @@ jobs:
           # 获取页面内容
           PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
           
-          # 精确提取包文件名和版本的函数
+          # 精确提取包文件名和版本的函数（修复：转义pkg中的.）
           get_latest() {
             local pkg="$1"
-            local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}[^\"]+\">" | cut -d'"' -f2)
+            # 关键修复：将包名中的.转义为\.，避免正则匹配错误（如containerd.io匹配containerdio等）
+            local escaped_pkg=$(echo "$pkg" | sed 's/\./\\./g')
+            # 使用转义后的包名进行grep匹配
+            local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${escaped_pkg}[^\"]+\">" | cut -d'"' -f2)
             
             if [ -z "$matches" ]; then
-              echo "ERROR: No package found for ${pkg}" >&2
+              echo "ERROR: No package found for ${pkg} (escaped: ${escaped_pkg})" >&2
               exit 1
             fi
             
@@ -53,14 +56,14 @@ jobs:
             local latest=$(echo "$matches" | sort -Vr | head -n1)
             
             # 提取版本号（去除文件名前缀和后缀）
-            local version=$(echo "$latest" | sed -E "s/^${pkg}_([0-9]+\.[0-9]+\.[0-9]+[^_]+)_.*$/\1/")
+            local version=$(echo "$latest" | sed -E "s/^${escaped_pkg}_([0-9]+\.[0-9]+\.[0-9]+[^_]+)_.*$/\1/")
             
-            # 关键修复：使用 printf 进行间接变量赋值
-            # 这会正确地创建如 "containerd.io_URL=..." 这样的输出
+            # 输出URL和版本到GITHUB_OUTPUT
             printf "%s=%s\n" "${pkg}_URL" "${BASE_URL}/${latest}" >> "$GITHUB_OUTPUT"
             printf "%s=%s\n" "${pkg}_VERSION" "$version" >> "$GITHUB_OUTPUT"
           }
 
+          # 调用函数获取各组件信息（含containerd.io）
           get_latest "containerd.io"
           get_latest "docker-ce"
           get_latest "docker-ce-cli"
@@ -76,7 +79,7 @@ jobs:
           echo "## Docker 组件" >> "$VERSION_FILE"
           echo "" >> "$VERSION_FILE"
 
-          # 下载每个 Docker 组件
+          # 下载每个 Docker 组件（引用上一步输出的变量）
           echo "Downloading containerd.io..."
           curl -fsSL "${{ steps.docker_info.outputs.containerd.io_URL }}" -o "$TARGET_DIR/containerd.io.deb"
           echo "containerd.io: ${{ steps.docker_info.outputs.containerd.io_VERSION }}" >> "$VERSION_FILE"
