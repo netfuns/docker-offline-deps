@@ -75,9 +75,10 @@ jobs:
           mkdir -p "$TARGET_DIR/system"
           packages=(${SYSTEM_PACKAGES// / })
           
-          # 下载Packages.gz文件
-          curl -fsSL "https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/Packages.gz" -o Packages.gz
-          gunzip -c Packages.gz > Packages
+          # 修复后的Packages.gz下载URL
+          PACKAGES_GZ_URL="https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/Packages.gz"
+          curl -fsSL "$PACKAGES_GZ_URL" -o Packages.gz || { echo "Failed to download Packages.gz"; exit 1; }
+          gunzip -c Packages.gz > Packages || { echo "Failed to extract Packages"; exit 1; }
 
           # 解析Packages文件并下载对应包
           while IFS= read -r line; do
@@ -86,7 +87,9 @@ jobs:
             elif [[ "$line" == *"Filename: "* ]]; then
               file=$(echo "$line" | awk '{print $2}')
               if [[ " ${packages[*]} " =~ " ${pkg} " ]]; then
-                curl -fsSL "https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/$file" -o "$TARGET_DIR/system/$pkg.deb"
+                # 修复后的单个包下载URL
+                FILE_URL="https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/$file"
+                curl -fsSL "$FILE_URL" -o "$TARGET_DIR/system/$pkg.deb" || { echo "Failed to download $pkg"; exit 1; }
                 packages=(${packages[@]/$pkg})  # 移除已处理的包
               fi
             fi
