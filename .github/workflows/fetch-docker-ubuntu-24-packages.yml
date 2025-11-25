@@ -78,31 +78,53 @@ jobs:
           # 遍历所有可能的仓库子目录
           REPOS=("main" "updates" "security")
           for repo in "${REPOS[@]}"; do
+            echo "Trying repository: $repo"
             # 下载Packages.gz文件
             PACKAGES_GZ_URL="https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/${repo}/binary-${ARCH}/Packages.gz"
-            echo "Trying repository: $repo"
-            curl -fsSL "$PACKAGES_GZ_URL" -o Packages.gz || continue
-            gunzip -c Packages.gz > Packages || continue
+            if ! curl -fsSL "$PACKAGES_GZ_URL" -o Packages.gz; then
+              echo "WARNING: Failed to download Packages.gz from $repo"
+              continue
+            fi
+            
+            # 解压Packages文件
+            if ! gunzip -c Packages.gz > Packages; then
+              echo "WARNING: Failed to extract Packages from $repo"
+              rm -f Packages.gz
+              continue
+            fi
             
             # 解析Packages文件并下载对应包
+            current_pkg=""
             while IFS= read -r line; do
-              if [[ "$line" == *"Package: "* ]]; then
-                pkg=$(echo "$line" | awk '{print $2}')
-              elif [[ "$line" == *"Filename: "* ]]; then
+              if [[ "$line" == "Package: "* ]]; then
+                current_pkg=$(echo "$line" | awk '{print $2}')
+              elif [[ "$line" == "Filename: "* && -n "$current_pkg" ]]; then
                 file=$(echo "$line" | awk '{print $2}')
-                if [[ " ${packages[*]} " =~ " ${pkg} " ]]; then
-                  # 构建完整下载URL
-                  FILE_URL="https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/${repo}/binary-${ARCH}/$file"
-                  echo "Downloading $pkg from $repo repository..."
-                  curl -fsSL "$FILE_URL" -o "$TARGET_DIR/system/$pkg.deb" || { echo "Failed to download $pkg"; exit 1; }
-                  packages=(${packages[@]/$pkg})  # 移除已处理的包
+                # 检查当前包是否在需要下载的列表中
+                if [[ " ${packages[*]} " =~ " ${current_pkg} " ]]; then
+                  # 构建完整下载URL (Filename已经包含了pool/...路径)
+                  FILE_URL="https://archive.ubuntu.com/ubuntu/${file}"
+                  echo "Downloading $current_pkg from $repo repository..."
+                  echo "URL: $FILE_URL"
+                  if curl -fsSL "$FILE_URL" -o "$TARGET_DIR/system/$current_pkg.deb"; then
+                    # 移除已成功下载的包
+                    packages=(${packages[@]/$current_pkg})
+                    echo "Successfully downloaded $current_pkg"
+                  else
+                    echo "WARNING: Failed to download $current_pkg from $repo"
+                  fi
                 fi
               fi
             done < Packages
             
             # 清理临时文件
             rm -f Packages Packages.gz
-            if [ ${#packages[@]} -eq 0 ]; then break; fi
+            
+            # 如果所有包都已下载完成，提前退出循环
+            if [ ${#packages[@]} -eq 0 ]; then
+              echo "All packages downloaded successfully!"
+              break
+            fi
           done
 
           # 检查是否有未找到的包
@@ -113,6 +135,7 @@ jobs:
 
       # ----------------------------
       # Step 3: Merge & Compress
+      # ----------------------------
       - name: Merge system packages into root
         run: |
           mv "$TARGET_DIR/system"/* "$TARGET_DIR/"
@@ -130,6 +153,7 @@ jobs:
         with:
           name: ubuntu-24.04-docker-system-deps
           path: "$TARGET_DIR/deps.tar.gz"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -149,6 +173,7 @@ jobs:
 
       # ----------------------------
       # Step 4: Cleanup
+      # ----------------------------
       - name: Cleanup
         run: |
-          rm -rf "$TARGET_DIR/docker"
+          rm -rf "$TARGET_DIR"
