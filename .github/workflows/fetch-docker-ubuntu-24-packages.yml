@@ -55,8 +55,10 @@ jobs:
             # 提取版本号（去除文件名前缀和后缀）
             local version=$(echo "$latest" | sed -E "s/^${pkg}_([0-9]+\.[0-9]+\.[0-9]+[^_]+)_.*$/\1/")
             
-            echo "$pkg_URL=$BASE_URL/$latest" >> $GITHUB_OUTPUT
-            echo "$pkg_VERSION=$version" >> $GITHUB_OUTPUT
+            # 关键修复：使用 printf 进行间接变量赋值
+            # 这会正确地创建如 "containerd.io_URL=..." 这样的输出
+            printf "%s=%s\n" "${pkg}_URL" "${BASE_URL}/${latest}" >> "$GITHUB_OUTPUT"
+            printf "%s=%s\n" "${pkg}_VERSION" "$version" >> "$GITHUB_OUTPUT"
           }
 
           get_latest "containerd.io"
