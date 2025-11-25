@@ -34,7 +34,7 @@ jobs:
           
           # 获取仓库页面内容
           PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
-          echo "DEBUG: 仓库页面内容预览:"
+          echo "DEBUG: Repository page content:"
           echo "$PAGE_CONTENT" | head -n 20
 
           # 提取指定包的最新版本（rpm 格式）
@@ -44,11 +44,11 @@ jobs:
             local matches=$(echo "$PAGE_CONTENT" | grep -oE "<a href=\"${pkg}[^\"]+\">" | cut -d'"' -f2)
             
             if [ -z "$matches" ]; then
-              echo "ERROR: 未找到 ${pkg} 的 rpm 包" >&2
+              echo "ERROR: No package found for ${pkg}" >&2
               return 1
             fi
             
-            # 按版本号排序取最新
+            # 按版本号排序并取最新版本
             echo "$matches" | sort -Vr | head -n1
           }
 
