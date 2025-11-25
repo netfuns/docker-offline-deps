@@ -14,19 +14,21 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: "centos:9"  # 需要运行的容器镜像（参考 docker hub）
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo yum install -y curl jq gzip tar
+        run: sudo dnf install -y curl jq gzip tar
 
       # ----------------------------
       # Step 1: Configure Docker Repository
       # ----------------------------
       - name: Add Docker CE repository
         run: |
-          sudo tee /etc/yum.repos.d/docker-ce.repo << EOF
+          sudo tee /etc/dnf.repos.d/docker-ce.repo << EOF
           [docker-ce-stable]
           name=Docker CE Stable - \$basearch
           baseurl=https://download.docker.com/linux/centos/\$releasever/\$basearch/stable
@@ -40,7 +42,7 @@ jobs:
       # ----------------------------
       - name: Install Docker packages
         run: |
-          sudo yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
       # ----------------------------
       # Step 3: Download System Packages
@@ -57,7 +59,7 @@ jobs:
           for pkg in "${packages[@]}"; do
             echo "Downloading $pkg..."
             # 使用 dnf 下载指定包
-            sudo yum download --destdir="$TARGET_DIR/deps" --resolve "$pkg"
+            sudo dnf download --destdir="$TARGET_DIR/deps" --resolve "$pkg"
           done
 
       # ----------------------------
