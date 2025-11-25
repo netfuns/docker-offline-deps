@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo dnf install -y curl jq gzip tar
+        run: sudo yum install -y curl jq gzip tar
 
       # ----------------------------
       # Step 1: Configure Docker Repository
@@ -40,7 +40,7 @@ jobs:
       # ----------------------------
       - name: Install Docker packages
         run: |
-          sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          sudo yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
       # ----------------------------
       # Step 3: Download System Packages
@@ -57,7 +57,7 @@ jobs:
           for pkg in "${packages[@]}"; do
             echo "Downloading $pkg..."
             # 使用 dnf 下载指定包
-            sudo dnf download --destdir="$TARGET_DIR/deps" --resolve "$pkg"
+            sudo yum download --destdir="$TARGET_DIR/deps" --resolve "$pkg"
           done
 
       # ----------------------------
