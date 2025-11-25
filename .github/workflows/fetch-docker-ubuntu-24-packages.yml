@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ca-certificates curl jq apt-utils
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ca-certificates curl jq gzip
 
       # ----------------------------
       # Step 1: Fetch Docker Components
@@ -59,41 +59,46 @@ jobs:
           mkdir -p "$TARGET_DIR/system"
           packages=(${SYSTEM_PACKAGES// / })
           
-          # 创建临时APT缓存目录
-          tmp_cache=$(mktemp -d)
-          echo "APT::Cache-Limit 100000000;" | sudo tee /etc/apt/apt.conf.d/99cache-limit >/dev/null
-          
-          # 配置APT源
-          cat <<EOF | sudo tee /etc/apt/sources.list
-          deb http://archive.ubuntu.com/ubuntu/ ${UBUNTU_CODENAME} main restricted universe multiverse
-          deb-src http://archive.ubuntu.com/ubuntu/ ${UBUNTU_CODENAME} main restricted universe multiverse
-          EOF
+          # 下载Packages.gz文件
+          curl -fsSL "https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/Packages.gz" -o Packages.gz
+          gunzip -c Packages.gz > Packages
 
-          # 更新包列表并安装到临时目录
-          sudo apt-get update
-          sudo apt-get download -d ${packages[@]} --reinstall --allow-downgrades --allow-change-held-packages --target-release=${UBUNTU_CODENAME}
+          # 解析Packages文件并下载对应包
+          while IFS= read -r line; do
+            if [[ "$line" == *"Package: "* ]]; then
+              pkg=$(echo "$line" | awk '{print $2}')
+            elif [[ "$line" == *"Filename: "* ]]; then
+              file=$(echo "$line" | awk '{print $2}')
+              if [[ " ${packages[*]} " =~ " ${pkg} " ]]; then
+                curl -fsSL "https://archive.ubuntu.com/ubuntu/dists/${UBUNTU_CODENAME}/main/binary-${ARCH}/$file" -o "$TARGET_DIR/system/$pkg.deb"
+                packages=(${packages[@]/$pkg})  # 移除已处理的包
+              fi
+            fi
+          done < Packages
 
-          # 移动下载的deb文件到目标目录
-          find /var/cache/apt/archives/ -name '*.deb' -exec mv {} "$TARGET_DIR/system/" \;
+          # 检查是否有未找到的包
+          if [ ${#packages[@]} -ne 0 ]; then
+            echo "ERROR: Missing packages: ${packages[@]}" >&2
+            exit 1
+          fi
 
           # 清理临时文件
-          rm -rf "$tmp_cache"
-          sudo rm -rf /var/cache/apt/archives/*.deb
+          rm -f Packages Packages.gz
 
       # ----------------------------
       # Step 3: Compression & Verification
       - name: Compress deps directory
         run: |
           cd "$TARGET_DIR"
-          zip -r deps.zip ./*
-          echo "Final deps.zip structure:"
-          unzip -l deps.zip
+          tar -czvf deps.tar.gz ./*
+          echo "Final deps.tar.gz structure:"
+          tar -tf deps.tar.gz
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ubuntu-24.04-docker-system-deps
-          path: "$TARGET_DIR/deps.zip"
+          path: "$TARGET_DIR/deps.tar.gz"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -107,7 +112,7 @@ jobs:
             
             支持架构: amd64
           files: |
-            ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.zip
+            ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
 
