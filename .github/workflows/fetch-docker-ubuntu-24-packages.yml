@@ -104,7 +104,7 @@ jobs:
       - name: Download system packages
         run: |
           set -euo pipefail
-          mkdir -p "$TARGET_DIR/system"
+          mkdir -p "$TARGET_DIR/deps"
           packages=(${SYSTEM_PACKAGES// / })
           
           # 遍历所有可能的仓库子目录
@@ -160,23 +160,17 @@ jobs:
 
           # 调试：列出下载的文件
           echo "System packages downloaded:"
-          ls -la "$TARGET_DIR/system/"
-          mv "$TARGET_DIR/system/*" "$TARGET_DIR/deps/"
+          ls -la "$TARGET_DIR/deps/"
 
       # ----------------------------
       # Step 3: Merge & Compress
       # ----------------------------
       - name: Merge all packages into root deps directory
         run: |
-          # 将 docker 和 system 目录下的所有 .deb 文件移动到 deps 根目录
-          mv "$TARGET_DIR/docker"/*.deb "$TARGET_DIR/"
-          mv "$TARGET_DIR/system"/*.deb "$TARGET_DIR/"
-          # 删除空的子目录
-          rmdir "$TARGET_DIR/docker" "$TARGET_DIR/system"
           
           # 调试：列出将要被压缩的所有文件
           echo "Final package list to compress:"
-          ls -la "$TARGET_DIR/"
+          ls -la "$TARGET_DIR/deps/"
 
       - name: Check if deps directory is empty
         id: check_empty
@@ -192,7 +186,7 @@ jobs:
         if: steps.check_empty.outputs.is_empty == 'false'
         run: |
           cd "$TARGET_DIR"
-          tar -czvf deps.tar.gz ./*.deb
+          tar -czvf deps.tar.gz ./deps
           echo "Final deps.tar.gz structure:"
           tar -tf deps.tar.gz
 
