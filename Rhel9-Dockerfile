@@ -1,5 +1,5 @@
 # 基础镜像
-FROM redhat/ubi9-minimal:latest
+FROM redhat/ubi9:latest
 
 # 安装必要工具
 RUN dnf install -y wget tar gzip dnf-plugins-core createrepo_c
