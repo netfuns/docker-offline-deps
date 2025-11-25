@@ -1,0 +1,32 @@
+# 基础镜像
+FROM redhat/ubi9-minimal:latest
+
+# 安装必要工具
+RUN dnf install -y wget tar gzip dnf-plugins-core createrepo_c
+
+# 配置Docker仓库（使用CentOS镜像源兼容Oracle Linux 9）
+RUN dnf config-manager --add-repo=https://download.docker.com/linux/rhel/docker-ce.repo
+
+# 下载所有需要的RPM包到临时目录
+RUN mkdir -p /deps && \
+    dnf download --resolve \
+    containerd.io \
+    docker-ce \
+    docker-ce-cli \
+    docker-ce-rootless-extras \
+    docker-buildx-plugin \
+    docker-compose-plugin -y
+
+
+# 安装软件包到指定目录（可选）
+RUN dnf install --downloadonly --destdir=/deps/ \
+    containerd.io docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin -y
+
+COPY oraclelinux9-install.sh /deps/install.sh
+RUN chmod +x /deps/install.sh
+
+# 合并所有文件到最终压缩包
+RUN tar -czvf /tmp.tar.gz /deps
+
+# 设置输出目录
+#VOLUME /tmp.tar.gz
