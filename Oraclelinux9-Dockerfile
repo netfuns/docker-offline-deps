@@ -21,11 +21,11 @@ RUN mkdir -p /deps && \
 RUN dnf install --downloadonly --destdir=/deps/ \
     containerd.io docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin
 
-COPY oraclelinux9-install.sh /deps/
+COPY oraclelinux9-install.sh /deps/install.sh
 RUN chmod +x /deps/oraclelinux9-install.sh
 
 # 合并所有文件到最终压缩包
-RUN tar -czvf /tmp.tar.gz -C /deps .
+RUN tar -czvf /tmp.tar.gz /deps
 
 # 设置输出目录
 #VOLUME /tmp.tar.gz
