@@ -3,7 +3,7 @@ name: Download Docker & Ubuntu System Packages
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *' # 每天 02:00 UTC 自动运行
+    - cron: '0 1 1 * *' # 每天 02:00 UTC 自动运行
 
 env:
   UBUNTU_CODENAME: noble   # 固定为 Ubuntu 24.04
