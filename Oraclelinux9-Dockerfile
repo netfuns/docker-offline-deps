@@ -22,7 +22,7 @@ RUN dnf install --downloadonly --destdir=/deps/ \
     containerd.io docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin
 
 # 合并所有文件到最终压缩包
-RUN tar -czvf /deps.tar.gz -C /deps .
+RUN tar -czvf /dep.tar.gz -C /deps .
 
 # 设置输出目录
 VOLUME /deps.tar.gz
