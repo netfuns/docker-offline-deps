@@ -34,8 +34,8 @@ jobs:
           
           # 获取页面内容
           PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" | tr -d '\r')
-          echo "DEBUG: Repository page content:"
-          echo "$PAGE_CONTENT" | head -n 20
+          #echo "DEBUG: Repository page content:"
+          #echo "$PAGE_CONTENT" | head -n 20
 
           # 精确提取包文件名的函数
           get_latest() {
