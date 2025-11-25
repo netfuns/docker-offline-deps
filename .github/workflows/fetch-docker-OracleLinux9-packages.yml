@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 1 1 * *' # 每月1号 01:00 UTC 自动运行
+env:
+  TARGET_DIR: deps         # 统一解压目标目录
 
 jobs:
   build:
@@ -24,23 +26,33 @@ jobs:
       - name: Extract dependencies
         id: build_deps
         run: |
+          mkdir -p $TARGET_DIR
           docker create --name temp-container oraclelinux9-builder
-          docker cp temp-container:/dep.tar.gz ./deps.tar.gz
+          docker cp temp-container:/dep.tar.gz "$TARGET_DIR/deps.tar.gz"
           docker rm temp-container
-          echo "::set-output name=success::$(test -f deps.tar.gz && echo 'true' || echo 'false')"
+
+      - name: Check if deps directory is empty
+        id: check_empty
+        run: |
+          if [ -z "$(ls -A $TARGET_DIR)" ]; then
+            echo "ERROR: No files found in $TARGET_DIR. Aborting compression." >&2
+            echo "is_empty=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_empty=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Upload artifact
         if: steps.check_empty.outputs.is_empty == 'false'
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-24.04-docker-system-deps
-          path: "./deps.tar.gz"
+          name: oraclelinux9-docker-system-deps
+          path: "$TARGET_DIR/deps.tar.gz"
 
       - name: Generate release tag
         if: steps.check_empty.outputs.is_empty == 'false'
         id: generate_tag
         run: |
-          RELEASE_TAG="oraclelinux9-24.04-deps-$(date +'%Y%m%d')"
+          RELEASE_TAG="oraclelinux9-deps-$(date +'%Y%m%d')"
           echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
 
       - name: Create GitHub Release
@@ -59,6 +71,10 @@ jobs:
             
             此 Release 由 GitHub Actions 自动生成。
           files: |
-            ${{ github.workspace }}/deps.tar.gz
+            ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+
+      - name: Cleanup
+        run: |
+          rm -rf "$TARGET_DIR"
