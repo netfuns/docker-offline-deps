@@ -26,13 +26,18 @@ jobs:
           ARCH=$(dpkg --print-architecture)
           BASE_URL="https://download.docker.com/linux/ubuntu/dists/${UBUNTU_CODENAME}/pool/stable/$ARCH"
 
-          # 获取最新版本包的通用函数（增强版）
+          # 获取页面内容（添加调试输出）
+          PAGE_CONTENT=$(curl -fsSL "$BASE_URL/" || echo "ERROR: Failed to fetch page")
+          echo "DEBUG: Repository page content:"
+          echo "$PAGE_CONTENT" | head -n 50  # 输出前50行便于调试
+
+          # 增强的正则表达式匹配逻辑
           get_latest() {
             local pkg="$1"
-            local page_content=$(curl -fsSL "$BASE_URL/" || echo "ERROR: Failed to fetch page")
+            local pkg_dir="/$pkg/"
             
-            # 增强的正则表达式匹配逻辑
-            echo "$page_content" | grep -oP 'href="\K[^"]+/'"$pkg"'/[^/]+_'"$ARCH"'\.deb'
+            # 匹配类似 /containerd.io/1.6.24-1~ubuntu.24.04~noble1_amd64.deb 的路径
+            echo "$PAGE_CONTENT" | grep -oP "href=\"\\K${pkg_dir}[^\"]+_${ARCH}\.deb"
           }
 
           # 获取各组件最新包链接
