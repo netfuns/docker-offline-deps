@@ -1,0 +1,57 @@
+name: Build OracleLinux9 Dependencies
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build Docker image
+        run: |
+          docker build -t oraclelinux9-builder -f Oraclelinux9-Dockerfile .
+
+      - name: Extract dependencies
+        id: extract
+        run: |
+          docker create --name temp-container oraclelinux9-builder
+          docker cp temp-container:/deps.tar.gz .
+          docker rm temp-container
+
+      - name: Generate version metadata
+        id: version
+        run: |
+          echo "Version: $(date +%Y%m%d)-$(git rev-parse --short HEAD)" > version.txt
+          echo "Build Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> version.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref }}
+          name: Release ${{ github.ref }}
+          body_path: ./OracleLinux9_RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: oraclelinux9-deps
+          path: |
+            deps.tar.gz
+            version.txt
+
+      - name: Append build info to release
+        run: |
+          echo "## Build Information" >> RELEASE_NOTES.md
+          echo "" >> OracleLinux9_RELEASE_NOTES.md
+          echo "Compiled Date: $(date -u '+%Y-%m-%d %H:%M:%S %Z')" >> OracleLinux9_RELEASE_NOTES.md
+          echo "Git Commit: $(git rev-parse HEAD)" >> OracleLinux9_RELEASE_NOTES.md
+          echo "Artifact SHA256: $(sha256sum deps.tar.gz | awk '{print $1}')" >> OracleLinux9_RELEASE_NOTES.md
