@@ -1,0 +1,80 @@
+name: Build & Release RockyLinux9 Dependencies
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 1 1 * *' # 每月1号 01:00 UTC 自动运行
+env:
+  TARGET_DIR: deps         # 统一解压目标目录
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      has_deps: ${{ steps.build_deps.outputs.success }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build Docker image
+        run: |
+          docker build -t rockylinux9-builder -f Rockylinux9-Dockerfile .
+
+      - name: Extract dependencies
+        id: build_deps
+        run: |
+          mkdir -p $TARGET_DIR
+          docker create --name temp-container rockylinux9-builder
+          docker cp temp-container:/tmp.tar.gz "$TARGET_DIR/deps.tar.gz"
+          docker rm temp-container
+
+      - name: Check if deps directory is empty
+        id: check_empty
+        run: |
+          if [ -z "$(ls -A $TARGET_DIR)" ]; then
+            echo "ERROR: No files found in $TARGET_DIR. Aborting compression." >&2
+            echo "is_empty=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_empty=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload artifact
+        if: steps.check_empty.outputs.is_empty == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rockylinux9-docker-system-deps
+          path: "$TARGET_DIR/deps.tar.gz"
+
+      - name: Generate release tag
+        if: steps.check_empty.outputs.is_empty == 'false'
+        id: generate_tag
+        run: |
+          RELEASE_TAG="rockylinux9-deps-$(date +'%Y%m%d')"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        if: steps.check_empty.outputs.is_empty == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: RockyLinux 9 Docker + System Dependencies (${{ env.RELEASE_TAG }})
+          body: |
+            📦 包含以下组件：
+            
+            - Docker CE 全家桶
+            - RockyLinux 9 系统工具包
+            
+            支持架构: amd64
+            
+            此 Release 由 GitHub Actions 自动生成。
+          files: |
+            ${{ github.workspace }}/${{ env.TARGET_DIR }}/deps.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+
+      - name: Cleanup
+        run: |
+          rm -rf "$TARGET_DIR"
