@@ -25,7 +25,7 @@ COPY oraclelinux9-install.sh /deps/
 RUN chmod +x /deps/oraclelinux9-install.sh
 
 # 合并所有文件到最终压缩包
-RUN tar -czvf /dep.tar.gz -C /deps .
+RUN tar -czvf /tmp.tar.gz -C /deps .
 
 # 设置输出目录
-VOLUME /dep.tar.gz
+VOLUME /tmp.tar.gz
